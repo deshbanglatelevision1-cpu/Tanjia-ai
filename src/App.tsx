@@ -1949,7 +1949,9 @@ export default function App() {
                             <div className="w-6 h-6 rounded-md overflow-hidden border border-white/10">
                                 <img src={selectedImage.data} className="w-full h-full object-cover" alt="Thumb" />
                             </div>
-                            <span className="text-[8px] font-black opacity-40 uppercase tracking-[0.2em] text-pink-300">File Ingested</span>
+                            <span className="text-[8px] font-black opacity-60 uppercase tracking-[0.2em] text-lumina-blue">
+                                {mode === 'search' ? 'Visual Search Active' : 'Neural Component Linked'}
+                            </span>
                             <button onClick={() => setSelectedImage(null)} className="p-1 hover:bg-white/10 rounded-full ml-auto">
                                 <X size={12} />
                             </button>
@@ -1958,8 +1960,13 @@ export default function App() {
                 </AnimatePresence>
 
                 <div className="relative glass-dark rounded-[24px] border-white/10 flex items-center px-2 py-1.5 min-h-[54px] shadow-2xl backdrop-blur-3xl group-focus-within:border-white/20 transition-all">
-                    <button onClick={() => fileInputRef.current?.click()} className="p-2.5 hover:bg-white/10 rounded-xl transition-all">
-                        <Plus size={ 18 } className="text-white/30" />
+                    <button 
+                        onClick={() => { fileInputRef.current?.click(); triggerHaptic('light'); }} 
+                        className="p-2.5 hover:bg-white/10 rounded-xl transition-all text-white/30 hover:text-white group/upload"
+                        title="Upload Image"
+                        aria-label="Upload an image to TANJIA AI"
+                    >
+                        <ImageIcon size={ 18 } className="group-hover/upload:scale-110 transition-transform" />
                     </button>
                     
                     <input 
