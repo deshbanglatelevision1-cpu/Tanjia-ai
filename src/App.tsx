@@ -89,6 +89,7 @@ export default function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [chatHistory, setChatHistory] = useState<{id: string, title: string, date: Date, messages: Message[]}[]>([]);
   const [showHistory, setShowHistory] = useState(false);
+  const [currentThreadId, setCurrentThreadId] = useState<string | null>(null);
   const [zoomedImage, setZoomedImage] = useState<string | null>(null);
   const [sideMenuOpen, setSideMenuOpen] = useState(false);
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
@@ -101,7 +102,9 @@ export default function App() {
                                     exactMatch: boolean,
                                     author: string,
                                     keyword: string,
-                                    sortOrder: 'relevance' | 'newest' | 'oldest'
+                                    sortOrder: 'relevance' | 'newest' | 'oldest',
+                                    aspectRatio: '1:1' | '16:9' | '9:16',
+                                    artStyle: 'none' | 'photorealistic' | 'abstract' | 'cartoon' | 'cyberpunk'
                                   }>({ 
                                     selectedSources: [], 
                                     dateRange: 'all', 
@@ -109,7 +112,9 @@ export default function App() {
                                     exactMatch: false,
                                     author: '',
                                     keyword: '',
-                                    sortOrder: 'relevance'
+                                    sortOrder: 'relevance',
+                                    aspectRatio: '1:1',
+                                    artStyle: 'none'
                                   });
   const [isTyping, setIsTyping] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
@@ -128,16 +133,40 @@ export default function App() {
   const startNewChat = () => {
     if (messages.length > 0) {
       const title = messages.find(m => m.role === 'user')?.content.slice(0, 30) || "Untitled Thread";
-      setChatHistory(prev => [{ id: Date.now().toString(), title, date: new Date(), messages: [...messages] }, ...prev]);
+      if (currentThreadId) {
+        setChatHistory(prev => prev.map(t => t.id === currentThreadId ? { ...t, messages: [...messages], date: new Date() } : t));
+      } else {
+        setChatHistory(prev => [{ id: Date.now().toString(), title, date: new Date(), messages: [...messages] }, ...prev]);
+      }
     }
     setMessages([]);
+    setCurrentThreadId(null);
     setHasSearched(false);
     setSideMenuOpen(false);
     triggerHaptic('medium');
   };
 
+  const saveCurrentThread = () => {
+    if (messages.length === 0) {
+      triggerHaptic('medium');
+      return;
+    }
+    
+    const title = messages.find(m => m.role === 'user')?.content.slice(0, 30) || "Untitled Thread";
+    
+    if (currentThreadId) {
+      setChatHistory(prev => prev.map(t => t.id === currentThreadId ? { ...t, messages: [...messages], date: new Date() } : t));
+    } else {
+      const newId = Date.now().toString();
+      setChatHistory(prev => [{ id: newId, title, date: new Date(), messages: [...messages] }, ...prev]);
+      setCurrentThreadId(newId);
+    }
+    triggerHaptic('success');
+  };
+
   const loadThread = (thread: any) => {
     setMessages(thread.messages);
+    setCurrentThreadId(thread.id);
     setMode('ai');
     setHasSearched(true);
     setSideMenuOpen(false);
@@ -235,6 +264,17 @@ export default function App() {
           handleSend();
         }, 300);
         triggerHaptic('success');
+      } else if (transcript.includes('search for')) {
+        const queryTerm = transcript.split('search for')[1]?.trim();
+        if (queryTerm) {
+          setQuery(queryTerm);
+          setMode('search');
+          setActiveTab('home');
+          setTimeout(() => {
+            handleSend();
+          }, 300);
+          triggerHaptic('success');
+        }
       } else if (transcript.includes('send message')) {
         handleSend();
         triggerHaptic('success');
@@ -479,7 +519,9 @@ export default function App() {
         exactMatch: false,
         author: '',
         keyword: '',
-        sortOrder: 'relevance'
+        sortOrder: 'relevance',
+        aspectRatio: '1:1',
+        artStyle: 'none'
       }); // Reset filters on new search
       
       // Save query to history if not empty and not already the most recent one
@@ -559,12 +601,18 @@ export default function App() {
 
     if (isImageReq && !userMessage.image) {
       try {
-        const generationPrompt = userMessage.content
+        let generationPrompt = userMessage.content
           .replace('/image', '')
           .replace('generate an image of', '')
           .replace('create an image of', '')
           .replace('ছবি তৈরি করো', '')
           .trim() || userMessage.content;
+
+        // Enhance prompt with filters
+        if (filters.artStyle !== 'none') {
+          generationPrompt += `, in ${filters.artStyle} style`;
+        }
+        generationPrompt += `, aspect ratio ${filters.aspectRatio}`;
 
         const aiId = (Date.now() + 1).toString();
         setMessages(prev => [...prev, { 
@@ -1320,6 +1368,38 @@ export default function App() {
                                                 </div>
                                             </div>
 
+                                            {/* Image Gen Params */}
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                                <div>
+                                                    <span className="text-[8px] font-black uppercase tracking-[0.2em] text-white/20 mb-3 block px-1">Aspect Ratio (AI Gen)</span>
+                                                    <div className="flex flex-wrap gap-2">
+                                                        {(['1:1', '16:9', '9:16'] as const).map(ratio => (
+                                                            <button 
+                                                                key={ratio}
+                                                                onClick={() => setFilters(prev => ({ ...prev, aspectRatio: ratio }))}
+                                                                className={`px-3 py-1.5 rounded-xl text-[10px] font-bold transition-all ${filters.aspectRatio === ratio ? 'bg-lumina-blue/20 text-white border border-lumina-blue/30' : 'bg-white/5 text-white/20 hover:text-white/40 border border-transparent'}`}
+                                                            >
+                                                                {ratio}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                                <div>
+                                                    <span className="text-[8px] font-black uppercase tracking-[0.2em] text-white/20 mb-3 block px-1">Art Style (AI Gen)</span>
+                                                    <div className="flex flex-wrap gap-2">
+                                                        {(['none', 'photorealistic', 'abstract', 'cartoon', 'cyberpunk'] as const).map(style => (
+                                                            <button 
+                                                                key={style}
+                                                                onClick={() => setFilters(prev => ({ ...prev, artStyle: style }))}
+                                                                className={`px-3 py-1.5 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all ${filters.artStyle === style ? 'bg-lumina-blue/20 text-white border border-lumina-blue/30' : 'bg-white/5 text-white/20 hover:text-white/40 border border-transparent'}`}
+                                                            >
+                                                                {style}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            </div>
+
                                             <div className="pt-4 border-t border-white/5 flex items-center justify-between">
                                                 <div className="flex items-center gap-4">
                                                     <div className="flex items-center gap-3 group px-1">
@@ -1343,7 +1423,9 @@ export default function App() {
                                                         exactMatch: false,
                                                         author: '',
                                                         keyword: '',
-                                                        sortOrder: 'relevance'
+                                                        sortOrder: 'relevance',
+                                                        aspectRatio: '1:1',
+                                                        artStyle: 'none'
                                                     })} 
                                                     className="px-4 py-2 text-[9px] font-black uppercase tracking-widest text-blue-400 hover:bg-blue-400/10 rounded-xl transition-all"
                                                 >
@@ -1464,7 +1546,37 @@ export default function App() {
                     </div>
                   </div>
                 ) : (
-                  messages.map((msg) => (
+                  <>
+                    <div className="flex items-center justify-between mb-12 px-4 pb-6 border-b border-white/5">
+                        <div className="flex flex-col">
+                            <h2 className="text-xl font-bold text-white line-clamp-1">
+                                {messages.find(m => m.role === 'user')?.content.slice(0, 40) || "Active Neural Thread"}
+                            </h2>
+                            <div className="flex items-center gap-2 mt-1">
+                                <div className={`w-1.5 h-1.5 rounded-full ${currentThreadId ? 'bg-lumina-blue animate-pulse' : 'bg-white/20'}`} />
+                                <span className="text-[10px] uppercase tracking-[0.3em] text-white/30">
+                                    {currentThreadId ? 'Synchronized with Neural Core' : 'Ephemeral Layer session'}
+                                </span>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <button 
+                                onClick={saveCurrentThread}
+                                className={`p-3 glass rounded-2xl border-white/10 transition-all ${currentThreadId ? 'text-lumina-blue bg-lumina-blue/10 border-lumina-blue/20' : 'text-white/40 hover:text-white hover:border-white/20'}`}
+                                title={currentThreadId ? "Update Thread" : "Save Thread"}
+                            >
+                                <History size={18} />
+                            </button>
+                            <button 
+                                onClick={startNewChat}
+                                className="p-3 glass rounded-2xl border-white/10 hover:border-pink-400/50 text-white/40 hover:text-pink-400 transition-all"
+                                title="Initialize New Thread"
+                            >
+                                <Plus size={18} />
+                            </button>
+                        </div>
+                    </div>
+                    {messages.map((msg) => (
                     <div key={msg.id} className={`flex w-full ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                         <div className={`${speakingMessageId === msg.id ? 'ring-2 ring-lumina-pink/50 shadow-[0_0_30px_rgba(255,105,180,0.3)]' : ''} w-full ${msg.role === 'user' ? 'max-w-[85%] bg-lumina-pink/20 border border-white/10 text-white rounded-[24px] px-5 py-3 shadow-xl' : ''}`}>
                             {msg.role === 'model' && (
@@ -1731,7 +1843,8 @@ export default function App() {
                             )}
                         </div>
                     </div>
-                  ))
+                  ))}
+                  </>
                 )}
                 {isTyping && (
                     <div className="flex justify-start gap-4" role="status" aria-live="polite">
