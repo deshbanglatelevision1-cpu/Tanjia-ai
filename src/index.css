@@ -1,0 +1,138 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Libre Baskerville", serif;
+  
+  --color-lumina-pink: #ec4899; /* Tailwind Pink-500 */
+  --color-lumina-blue: #2563eb; /* Tailwind Blue-600 */
+  --color-lumina-violet: #7c3aed; /* Tailwind Violet-600 */
+  --color-lumina-deep: #1a0b2e;
+}
+
+@layer base {
+  body {
+    @apply bg-[--color-lumina-deep] text-white antialiased overflow-hidden;
+    font-family: var(--font-sans);
+  }
+}
+
+@layer utilities {
+  .glass {
+    @apply bg-white/10 backdrop-blur-[40px] border border-white/20 shadow-2xl;
+  }
+  
+  .glass-dark {
+    @apply bg-black/20 backdrop-blur-[50px] border border-white/10 shadow-2xl;
+  }
+
+  .text-gradient {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-pink-300 via-blue-200 to-violet-300;
+  }
+
+  .bg-lumina-gradient {
+    background: linear-gradient(135deg, var(--color-lumina-pink) 0%, var(--color-lumina-blue) 50%, var(--color-lumina-violet) 100%);
+  }
+
+  .bg-lumina-radial {
+    background: radial-gradient(circle at 50% 50%, transparent 0%, rgba(2, 2, 5, 0.4) 100%);
+  }
+
+  .animate-magic-text {
+    background: linear-gradient(
+      90deg, 
+      #ff00ff, #00ffff, #7f00ff, #ff00ff
+    );
+    background-size: 300% 100%;
+    animation: magic-shift 8s linear infinite;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  @keyframes magic-shift {
+    0% { background-position: 0% 50%; }
+    100% { background-position: 300% 50%; }
+  }
+
+  .loading-line {
+    height: 3px;
+    width: 100%;
+    background: linear-gradient(90deg, transparent, #ff00ff, #00ffff, transparent);
+    background-size: 200% 100%;
+    animation: loading-shimmer 1.5s infinite linear;
+  }
+
+  @keyframes loading-shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  .rounded-inner {
+    border-radius: 34px;
+  }
+}
+
+/* Atmospheric background - deeper, more vibrant Sleek Theme */
+.atmosphere {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: radial-gradient(circle at 50% 50%, #0f0a1f 0%, #000000 100%);
+  overflow: hidden;
+}
+
+.blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(140px);
+  opacity: 0.5;
+  mix-blend-mode: screen;
+  animation: float 30s infinite ease-in-out;
+}
+
+.blob-1 {
+  width: 700px;
+  height: 700px;
+  background: radial-gradient(circle, var(--color-lumina-pink) 0%, transparent 80%);
+  top: -15%;
+  left: -10%;
+}
+
+.blob-2 {
+  width: 800px;
+  height: 800px;
+  background: radial-gradient(circle, var(--color-lumina-blue) 0%, transparent 80%);
+  bottom: -20%;
+  right: -10%;
+  animation-delay: -9s;
+}
+
+.blob-3 {
+  width: 600px;
+  height: 600px;
+  background: radial-gradient(circle, var(--color-lumina-violet) 0%, transparent 80%);
+  top: 40%;
+  left: 25%;
+  animation-delay: -15s;
+}
+
+@keyframes float {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(10%, 10%) scale(1.1); }
+  66% { transform: translate(-5%, 5%) scale(0.9); }
+}
+
+/* Custom Scrollbar for Chat */
+::-webkit-scrollbar {
+  width: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-white/10 rounded-full;
+}
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-white/20;
+}
+

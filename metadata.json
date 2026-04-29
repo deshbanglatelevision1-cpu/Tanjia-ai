@@ -1,0 +1,9 @@
+{
+  "name": "TANJIA AI",
+  "description": "Premium neural intelligence and high-precision search engine with a vibrant pink-blue-violet glassmorphism aesthetic created by তানজিয়া.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ]
+}
