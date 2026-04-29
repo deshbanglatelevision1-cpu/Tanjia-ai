@@ -97,6 +97,7 @@ export default function App() {
   const [showFilters, setShowFilters] = useState(false);
   const [showGenSettings, setShowGenSettings] = useState(false);
   const [imagePromptHistory, setImagePromptHistory] = useState<string[]>([]);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
   const [filters, setFilters] = useState<{ 
                                     selectedSources: string[], 
                                     dateRange: 'all' | 'today' | 'week' | 'month' | 'year', 
@@ -192,6 +193,38 @@ export default function App() {
   const [editText, setEditText] = useState('');
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
   const recognitionRef = useRef<any>(null);
+
+  useEffect(() => {
+    if (mode === 'search' && query.length > 1) {
+      const timeoutId = setTimeout(() => {
+        const trending = [
+          "Latest AI research papers 2024",
+          "Neural architecture search techniques",
+          "Quantum computing breakthroughs",
+          "Tanjia AI enterprise features",
+          "Sustainable tech innovations",
+          "Multimodal Gemini models overview",
+          "Edge computing vs Cloud computing",
+          "AI ethics and bias mitigation"
+        ];
+        
+        const filteredHistory = searchQueryHistory.filter(h => 
+          h.toLowerCase().includes(query.toLowerCase()) && h.toLowerCase() !== query.toLowerCase()
+        );
+        
+        const filteredTrends = trending.filter(t => 
+          t.toLowerCase().includes(query.toLowerCase())
+        );
+        
+        // Prioritize history, then trends, limit to 4
+        const combined = [...new Set([...filteredHistory, ...filteredTrends])].slice(0, 4);
+        setSuggestions(combined);
+      }, 300);
+      return () => clearTimeout(timeoutId);
+    } else {
+      setSuggestions([]);
+    }
+  }, [query, mode, searchQueryHistory]);
 
   useEffect(() => {
     const timer = setTimeout(() => setShowSplash(false), 2500);
@@ -631,7 +664,7 @@ export default function App() {
           isStreaming: true
         }]);
 
-        const generatedImageUrl = await generateImageWithGemini(generationPrompt);
+        const generatedImageUrl = await generateImageWithGemini(generationPrompt, filters.aspectRatio);
         
         // Save to prompt history
         setImagePromptHistory(prev => {
@@ -1462,9 +1495,20 @@ export default function App() {
                                         key={res.id} 
                                         initial={{ opacity: 0, y: 15 }}
                                         animate={{ opacity: 1, y: 0 }}
-                                        transition={{ duration: 0.4, delay: i * 0.05 }}
+                                        whileHover={{ 
+                                            scale: 1.02, 
+                                            y: -5,
+                                            boxShadow: "0 20px 40px rgba(0,0,0,0.4)",
+                                            borderColor: "rgba(255,255,255,0.3)"
+                                        }}
+                                        transition={{ 
+                                            duration: 0.4, 
+                                            delay: i * 0.05,
+                                            scale: { duration: 0.2 },
+                                            y: { duration: 0.2 }
+                                        }}
                                         onClick={() => setActiveUrl(res.url)} 
-                                        className="glass p-6 rounded-[32px] border-white/10 hover:border-white/30 transition-all cursor-pointer group"
+                                        className="glass p-6 rounded-[32px] border-white/10 transition-all cursor-pointer group"
                                     >
                                         <div className="flex items-center justify-between mb-1">
                                             <div className="flex items-center gap-2">
@@ -2046,7 +2090,7 @@ export default function App() {
                                 {imagePromptHistory.length > 0 && (
                                     <div className="pt-4 border-t border-white/5">
                                         <span className="text-[8px] font-black uppercase tracking-[0.2em] text-white/30 mb-3 block">Past Prompts</span>
-                                        <div className="flex flex-col gap-2 max-h-[160px] overflow-y-auto pr-2 custom-scrollbar">
+                                        <div className="flex flex-col gap-2 max-h-[120px] overflow-y-auto pr-2 custom-scrollbar">
                                             {imagePromptHistory.map((prompt, idx) => (
                                                 <button 
                                                     key={idx}
@@ -2061,10 +2105,89 @@ export default function App() {
                                         </div>
                                     </div>
                                 )}
+
+                                <div className="pt-4 border-t border-white/5">
+                                    <span className="text-[8px] font-black uppercase tracking-[0.2em] text-white/30 mb-3 block">Inspiration Presets</span>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        {[
+                                            { label: "Neon Samurai", prompt: "/image a futuristic samurai in a neon-drenched cyberpunk alleyway, 8k, cinematic lighting" },
+                                            { label: "Floating Isles", prompt: "/image ethereal floating islands with waterfalls cascading into clouds, dreamlike fantasy art" },
+                                            { label: "Glass Tech", prompt: "/image minimalist architectural design of a glass laboratory in a snowy forest, sharp focus" },
+                                            { label: "Organic Core", prompt: "/image abstract macro photography of iridescent bioluminescent organisms, glowing details" }
+                                        ].map((preset, idx) => (
+                                            <button 
+                                                key={idx}
+                                                onClick={() => { setQuery(preset.prompt); triggerHaptic('medium'); }}
+                                                className="flex flex-col gap-1 p-2 rounded-xl bg-lumina-blue/5 hover:bg-lumina-blue/10 border border-white/5 hover:border-lumina-blue/20 transition-all text-left"
+                                            >
+                                                <span className="text-[10px] font-bold text-white/80">{preset.label}</span>
+                                                <span className="text-[8px] text-white/20 line-clamp-1 italic">Preset Config</span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
                             </div>
                         </motion.div>
                     )}
                 </AnimatePresence>
+
+                {mode === 'search' && suggestions.length > 0 && (
+                    <motion.div 
+                        initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                        className="absolute bottom-full mb-3 left-0 right-0 glass-dark p-2 rounded-2xl border-white/10 shadow-2xl backdrop-blur-3xl mx-2 z-50 flex flex-wrap gap-1.5"
+                    >
+                        <div className="w-full flex items-center justify-between mb-1.5 px-2">
+                             <div className="flex items-center gap-1.5">
+                                <Sparkles size={10} className="text-lumina-blue" />
+                                <span className="text-[8px] font-black uppercase tracking-[0.2em] text-white/40 leading-none">AI Suggestions</span>
+                             </div>
+                             <button onClick={() => setSuggestions([])} className="p-0.5 hover:bg-white/10 rounded-full">
+                                <X size={10} className="text-white/20" />
+                             </button>
+                        </div>
+                        {suggestions.map((suggestion, idx) => (
+                            <button 
+                                key={idx}
+                                onClick={() => { setQuery(suggestion); setSuggestions([]); handleSend(); triggerHaptic('light'); }}
+                                className="px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 hover:border-white/10 transition-all text-xs text-white/70 hover:text-white flex items-center gap-2 group/sug animate-in fade-in slide-in-from-bottom-1 duration-300 fill-mode-both"
+                                style={{ animationDelay: `${idx * 50}ms` }}
+                            >
+                                <span className="flex-1 text-left">{suggestion}</span>
+                                <ArrowRight size={10} className="opacity-0 group-hover/sug:opacity-100 transition-opacity text-lumina-blue" />
+                            </button>
+                        ))}
+                    </motion.div>
+                )}
+
+                {mode === 'ai' && (query.toLowerCase().startsWith('/image') || query.toLowerCase().includes('generate an image') || query.toLowerCase().includes('create an image')) && (
+                    <motion.div 
+                        initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                        className="absolute bottom-full mb-3 left-0 right-0 glass-dark p-2 rounded-2xl border-white/10 shadow-2xl backdrop-blur-3xl mx-2 z-50 flex flex-col gap-2"
+                    >
+                        <div className="flex items-center justify-between px-2 pt-1">
+                            <div className="flex items-center gap-1.5">
+                                <ImageIcon size={10} className="text-lumina-blue" />
+                                <span className="text-[8px] font-black uppercase tracking-[0.2em] text-white/40 leading-none">Generation Context: Aspect Ratio</span>
+                            </div>
+                            <span className="text-[10px] font-bold text-lumina-blue/80">{filters.aspectRatio}</span>
+                        </div>
+                        <div className="flex gap-1.5 p-1 bg-white/5 rounded-xl">
+                            {(['1:1', '16:9', '9:16'] as const).map(ratio => (
+                                <button 
+                                    key={ratio}
+                                    onClick={() => { setFilters(prev => ({ ...prev, aspectRatio: ratio })); triggerHaptic('light'); }}
+                                    className={`flex-1 py-2 rounded-lg text-[10px] font-black tracking-widest transition-all border ${filters.aspectRatio === ratio ? 'bg-lumina-blue/20 text-white border-lumina-blue/40 shadow-[0_0_15px_rgba(30,144,255,0.2)]' : 'text-white/30 border-transparent hover:bg-white/5 hover:text-white/60'}`}
+                                >
+                                    {ratio}
+                                </button>
+                            ))}
+                        </div>
+                    </motion.div>
+                )}
 
                 <div className="relative glass-dark rounded-[24px] border-white/10 flex items-center px-2 py-1.5 min-h-[54px] shadow-2xl backdrop-blur-3xl group-focus-within:border-white/20 transition-all">
                     <button 

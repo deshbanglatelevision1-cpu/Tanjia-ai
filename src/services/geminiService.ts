@@ -34,7 +34,7 @@ export const chatWithGeminiStream = async (prompt: string, history: any[] = []) 
     return result;
 };
 
-export const generateImageWithGemini = async (prompt: string) => {
+export const generateImageWithGemini = async (prompt: string, aspectRatio: string = "1:1") => {
     const ai = getGemini();
     
     const response = await ai.models.generateContent({
@@ -49,7 +49,7 @@ export const generateImageWithGemini = async (prompt: string) => {
         ],
         config: {
             imageConfig: {
-                aspectRatio: "1:1"
+                aspectRatio: aspectRatio as any
             }
         }
     });
