@@ -9,7 +9,7 @@ import {
   Search, Sparkles, Image as ImageIcon, X, ArrowRight, Loader2, 
   User, Bot, Command, Globe, ExternalLink, ChevronLeft, 
   Monitor, Smartphone, Tablet, RefreshCcw, Menu, Mic, Camera,
-  Plus, Home, Bell, History, Settings, MoreHorizontal, HelpCircle,
+  Plus, Home, Bell, History, Settings, MoreHorizontal, HelpCircle, MessageSquare,
   CloudRain, Zap, Music, PenTool, Layout, ThumbsUp, ThumbsDown,
   Volume2, VolumeX, Copy, Share2, Filter, SlidersHorizontal, Calendar, Download,
   FileText, FileCode
@@ -230,6 +230,8 @@ export default function App() {
   const [filteredResults, setFilteredResults] = useState<SearchResult[]>([]);
   const [showFilters, setShowFilters] = useState(false);
   const [showGenSettings, setShowGenSettings] = useState(false);
+  const [showRefineModal, setShowRefineModal] = useState(false);
+  const [lastExecutedQuery, setLastExecutedQuery] = useState('');
   const [imagePromptHistory, setImagePromptHistory] = useState<string[]>([]);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [filters, setFilters] = useState<{ 
@@ -600,7 +602,7 @@ export default function App() {
     if (filters.keyword.trim()) {
       results = results.filter(r => 
         (r.title || '').toLowerCase().includes(filters.keyword.toLowerCase()) || 
-        (r.content || '').toLowerCase().includes(filters.keyword.toLowerCase())
+        (r.description || '').toLowerCase().includes(filters.keyword.toLowerCase())
       );
     }
 
@@ -615,12 +617,12 @@ export default function App() {
         const q = query.toLowerCase();
         results.sort((a, b) => {
           const aTitle = (a.title || '').toLowerCase();
-          const aContent = (a.content || '').toLowerCase();
+          const aDescription = (a.description || '').toLowerCase();
           const bTitle = (b.title || '').toLowerCase();
-          const bContent = (b.content || '').toLowerCase();
+          const bDescription = (b.description || '').toLowerCase();
 
-          const aCount = (aTitle.match(new RegExp(q, 'g')) || []).length + (aContent.match(new RegExp(q, 'g')) || []).length;
-          const bCount = (bTitle.match(new RegExp(q, 'g')) || []).length + (bContent.match(new RegExp(q, 'g')) || []).length;
+          const aCount = (aTitle.match(new RegExp(q, 'g')) || []).length + (aDescription.match(new RegExp(q, 'g')) || []).length;
+          const bCount = (bTitle.match(new RegExp(q, 'g')) || []).length + (bDescription.match(new RegExp(q, 'g')) || []).length;
           return bCount - aCount;
         });
       }
@@ -678,6 +680,7 @@ export default function App() {
 
   const handleSend = async () => {
     if (!query.trim() && !selectedImage) return;
+    setLastExecutedQuery(query);
     triggerHaptic('medium');
 
     let effectiveQuery = query;
@@ -1411,6 +1414,106 @@ export default function App() {
                     )}
 
                     {/* 2. WEB SEARCH CARDS SECTION */}
+                    <AnimatePresence>
+                        {showRefineModal && (
+                            <motion.div 
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                exit={{ opacity: 0 }}
+                                className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md"
+                                onClick={() => setShowRefineModal(false)}
+                            >
+                                <motion.div 
+                                    initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                                    animate={{ scale: 1, opacity: 1, y: 0 }}
+                                    exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                                    className="w-full max-w-2xl glass-dark rounded-[40px] border-white/10 p-8 shadow-2xl overflow-hidden relative"
+                                    onClick={e => e.stopPropagation()}
+                                >
+                                    <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-transparent via-lumina-blue to-transparent opacity-50" />
+                                    
+                                    <div className="flex items-center justify-between mb-8">
+                                        <div className="flex items-center gap-3">
+                                            <div className="p-2.5 rounded-2xl bg-lumina-blue/10 border border-lumina-blue/20">
+                                                <Sparkles size={20} className="text-lumina-blue" />
+                                            </div>
+                                            <div>
+                                                <h2 className="text-xl font-black tracking-tight text-white mb-1">Refine Prompt</h2>
+                                                <p className="text-[10px] uppercase tracking-[0.2em] font-bold text-white/30">AI-Powered Query Enhancement</p>
+                                            </div>
+                                        </div>
+                                        <button 
+                                            onClick={() => setShowRefineModal(false)}
+                                            className="p-2 rounded-full hover:bg-white/5 text-white/20 hover:text-white transition-all"
+                                        >
+                                            <X size={20} />
+                                        </button>
+                                    </div>
+
+                                    <div className="space-y-6">
+                                        <div>
+                                            <span className="text-[8px] font-black uppercase tracking-[0.2em] text-white/20 mb-3 block px-1">Original Query</span>
+                                            <div className="p-4 rounded-2xl bg-white/5 border border-white/5 font-mono text-xs text-white/60 italic">
+                                                "{lastExecutedQuery}"
+                                            </div>
+                                        </div>
+
+                                        <div className="relative">
+                                            <span className="text-[8px] font-black uppercase tracking-[0.2em] text-white/20 mb-3 block px-1">Refined Query / Modifications</span>
+                                            <textarea 
+                                                autoFocus
+                                                value={query}
+                                                onChange={(e) => setQuery(e.target.value)}
+                                                placeholder="Add more context or specific instructions to refine your search..."
+                                                className="w-full h-32 bg-white/5 border border-white/10 rounded-3xl p-6 text-sm text-white placeholder:text-white/10 focus:outline-none focus:border-lumina-blue/40 transition-all resize-none group"
+                                            />
+                                            <div className="absolute bottom-4 right-4 flex gap-2">
+                                                <button 
+                                                    onClick={() => {
+                                                        setQuery(prev => `${prev} focused on recent developments in 2024`);
+                                                        triggerHaptic('light');
+                                                    }}
+                                                    className="px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 border border-white/5 text-[9px] font-bold text-white/40 hover:text-white transition-colors"
+                                                >
+                                                    + 2024 Focus
+                                                </button>
+                                                <button 
+                                                    onClick={() => {
+                                                        setQuery(prev => `Highly technical breakdown of ${prev}`);
+                                                        triggerHaptic('light');
+                                                    }}
+                                                    className="px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 border border-white/5 text-[9px] font-bold text-white/40 hover:text-white transition-colors"
+                                                >
+                                                    + Technical
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        <div className="flex gap-4 pt-4">
+                                            <button 
+                                                onClick={() => setShowRefineModal(false)}
+                                                className="flex-1 py-4 rounded-3xl text-xs font-black uppercase tracking-[0.2em] text-white/40 hover:text-white hover:bg-white/5 transition-all"
+                                            >
+                                                Cancel
+                                            </button>
+                                            <button 
+                                                onClick={() => {
+                                                    setShowRefineModal(false);
+                                                    handleSend();
+                                                    triggerHaptic('medium');
+                                                }}
+                                                className="flex-[2] py-4 rounded-3xl bg-lumina-blue text-white text-xs font-black uppercase tracking-[0.2em] shadow-[0_20px_40px_rgba(30,144,255,0.3)] hover:shadow-[0_25px_50px_rgba(30,144,255,0.4)] transition-all flex items-center justify-center gap-3 active:scale-95"
+                                            >
+                                                Apply & Re-search
+                                                <ArrowRight size={16} />
+                                            </button>
+                                        </div>
+                                    </div>
+                                </motion.div>
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
+
                     {!isSearching && searchResults.length > 0 && (
                         <div className="space-y-4 pt-4">
                             <div className="flex items-center justify-between px-2 pb-2">
@@ -1422,14 +1525,21 @@ export default function App() {
                                     <button 
                                         onClick={() => {
                                             setMode('ai');
-                                            const currentSearchQuery = query;
-                                            setQuery(`Analyze these search results for "${currentSearchQuery}" and provide a concise summary of the key findings:\n\n${filteredResults.map((r, i) => `${i+1}. [${r.source}] ${r.title}: ${r.content.substring(0, 150)}...`).join('\n\n')}`);
+                                            const activeQuery = lastExecutedQuery || query;
+                                            setQuery(`Analyze these search results for "${activeQuery}" and provide a concise summary of the key findings:\n\n${filteredResults.map((r, i) => `${i+1}. [${r.source}] ${r.title}: ${r.description.substring(0, 150)}...`).join('\n\n')}`);
                                             triggerHaptic('medium');
                                         }}
                                         className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-blue-500/30 bg-blue-500/10 text-blue-300 hover:bg-blue-500/20 transition-all text-[10px] font-black uppercase tracking-wider shadow-[0_0_20px_rgba(30,144,255,0.1)]"
                                     >
                                         <Zap size={11} />
                                         Neural Analysis
+                                    </button>
+                                    <button 
+                                        onClick={() => setShowRefineModal(true)}
+                                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-white/5 text-white/20 hover:text-white/40 hover:bg-white/5 transition-all text-[10px] font-black uppercase tracking-wider"
+                                    >
+                                        <MessageSquare size={12} />
+                                        Refine Query
                                     </button>
                                     <button 
                                         onClick={() => setShowFilters(!showFilters)}
@@ -1672,7 +1782,9 @@ export default function App() {
                                         exactMatch: false,
                                         author: '',
                                         keyword: '',
-                                        sortOrder: 'relevance'
+                                        sortOrder: 'relevance',
+                                        aspectRatio: '1:1',
+                                        artStyle: 'none'
                                     })} className="mt-4 text-[10px] font-black uppercase tracking-[0.2em] text-blue-400 hover:text-blue-300">Clear All Filters</button>
                                 </div>
                             )}
