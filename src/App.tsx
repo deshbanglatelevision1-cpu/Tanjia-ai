@@ -95,6 +95,7 @@ export default function App() {
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [filteredResults, setFilteredResults] = useState<SearchResult[]>([]);
   const [showFilters, setShowFilters] = useState(false);
+  const [showGenSettings, setShowGenSettings] = useState(false);
   const [filters, setFilters] = useState<{ 
                                     selectedSources: string[], 
                                     dateRange: 'all' | 'today' | 'week' | 'month' | 'year', 
@@ -1957,6 +1958,57 @@ export default function App() {
                             </button>
                         </motion.div>
                     )}
+
+                    {mode === 'ai' && showGenSettings && (
+                        <motion.div 
+                            initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                            className="absolute bottom-full mb-4 left-0 right-0 glass-dark p-4 rounded-3xl border-white/10 shadow-2xl backdrop-blur-3xl mx-2 z-50"
+                        >
+                            <div className="flex items-center justify-between mb-4 px-1">
+                                <div className="flex items-center gap-2">
+                                    <Sparkles size={14} className="text-lumina-blue" />
+                                    <span className="text-[10px] font-black uppercase tracking-[0.2em] text-white">Generation Engine Tuning</span>
+                                </div>
+                                <button onClick={() => setShowGenSettings(false)} className="p-1 hover:bg-white/10 rounded-full">
+                                    <X size={14} />
+                                </button>
+                            </div>
+
+                            <div className="space-y-4">
+                                <div>
+                                    <span className="text-[8px] font-black uppercase tracking-[0.2em] text-white/30 mb-2 block">Aspect Ratio</span>
+                                    <div className="flex gap-2">
+                                        {(['1:1', '16:9', '9:16'] as const).map(ratio => (
+                                            <button 
+                                                key={ratio}
+                                                onClick={() => { setFilters(prev => ({ ...prev, aspectRatio: ratio })); triggerHaptic('light'); }}
+                                                className={`flex-1 py-2 rounded-xl text-[10px] font-bold transition-all border ${filters.aspectRatio === ratio ? 'bg-lumina-blue/20 text-white border-lumina-blue/40' : 'bg-white/5 text-white/40 border-transparent hover:border-white/10'}`}
+                                            >
+                                                {ratio}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <span className="text-[8px] font-black uppercase tracking-[0.2em] text-white/30 mb-2 block">Visual Style</span>
+                                    <div className="grid grid-cols-3 gap-2">
+                                        {(['none', 'photorealistic', 'abstract', 'cartoon', 'cyberpunk'] as const).map(style => (
+                                            <button 
+                                                key={style}
+                                                onClick={() => { setFilters(prev => ({ ...prev, artStyle: style })); triggerHaptic('light'); }}
+                                                className={`py-2 rounded-xl text-[9px] font-bold uppercase tracking-widest transition-all border ${filters.artStyle === style ? 'bg-lumina-blue/20 text-white border-lumina-blue/40' : 'bg-white/5 text-white/40 border-transparent hover:border-white/10'}`}
+                                            >
+                                                {style}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+                        </motion.div>
+                    )}
                 </AnimatePresence>
 
                 <div className="relative glass-dark rounded-[24px] border-white/10 flex items-center px-2 py-1.5 min-h-[54px] shadow-2xl backdrop-blur-3xl group-focus-within:border-white/20 transition-all">
@@ -1968,6 +2020,16 @@ export default function App() {
                     >
                         <ImageIcon size={ 18 } className="group-hover/upload:scale-110 transition-transform" />
                     </button>
+
+                    {mode === 'ai' && (
+                        <button 
+                            onClick={() => { setShowGenSettings(!showGenSettings); triggerHaptic('light'); }} 
+                            className={`p-2.5 rounded-xl transition-all ${showGenSettings ? 'text-lumina-blue bg-lumina-blue/10' : 'text-white/30 hover:text-white hover:bg-white/10'} group/tune`}
+                            title="Generation Settings"
+                        >
+                            <SlidersHorizontal size={ 18 } className="group-hover/tune:rotate-90 transition-transform duration-500" />
+                        </button>
+                    )}
                     
                     <input 
                         type="text" 
@@ -2056,9 +2118,11 @@ export default function App() {
                     onClick={() => { 
                       if (tab.id === 'history' || tab.id === 'analytics') {
                         setActiveTab(tab.id as any);
+                        setShowGenSettings(false);
                       } else {
                         setActiveTab('home');
                         setMode(tab.id as any);
+                        if (tab.id !== 'ai') setShowGenSettings(false);
                       }
                       triggerHaptic('light'); 
                     }}
