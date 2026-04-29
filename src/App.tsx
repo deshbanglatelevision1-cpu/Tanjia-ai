@@ -83,6 +83,140 @@ const NeuralBackground = () => {
     );
 };
 
+/* Neural Processing Component for Loading States */
+const NeuralProcessingIndicator = () => {
+    return (
+        <motion.div 
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="flex flex-col gap-6 w-full max-w-[90%] md:max-w-md"
+        >
+            <div className="flex items-center gap-3">
+                <div className="relative">
+                    <div className="w-10 h-10 rounded-full bg-lumina-blue/10 border border-lumina-blue/20 flex items-center justify-center overflow-hidden">
+                         <motion.div 
+                            animate={{ rotate: 360 }}
+                            transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
+                            className="absolute inset-0 opacity-20 bg-[conic-gradient(from_0deg,transparent,rgba(30,144,255,0.4),transparent)]" 
+                         />
+                         <Bot size={20} className="text-lumina-blue relative z-10" />
+                    </div>
+                    <motion.div 
+                        animate={{ scale: [1, 1.2, 1], opacity: [0.3, 0.6, 0.3] }}
+                        transition={{ duration: 2, repeat: Infinity }}
+                        className="absolute -inset-1 rounded-full bg-lumina-blue/20 blur-sm"
+                    />
+                </div>
+                <div className="flex flex-col">
+                    <span className="text-[10px] font-black uppercase tracking-[0.3em] text-lumina-blue animate-pulse">Deep Thinking...</span>
+                    <span className="text-[8px] font-medium text-white/30 uppercase tracking-[0.1em]">Neural Context Active</span>
+                </div>
+            </div>
+            
+            <div className="relative glass-dark p-6 md:p-8 rounded-[40px] border-white/5 bg-white/[0.03] overflow-hidden min-h-[140px] flex flex-col justify-center">
+                {/* Neural Network Visualization Background */}
+                <div className="absolute inset-0 opacity-30 pointer-events-none">
+                    {[...Array(8)].map((_, i) => (
+                        <motion.div
+                            key={i}
+                            initial={{ 
+                                x: Math.random() * 100 + "%", 
+                                y: Math.random() * 100 + "%" 
+                            }}
+                            animate={{ 
+                                x: [
+                                    Math.random() * 100 + "%", 
+                                    Math.random() * 100 + "%", 
+                                    Math.random() * 100 + "%"
+                                ],
+                                y: [
+                                    Math.random() * 100 + "%", 
+                                    Math.random() * 100 + "%", 
+                                    Math.random() * 100 + "%"
+                                ]
+                            }}
+                            transition={{ 
+                                duration: 15 + Math.random() * 10, 
+                                repeat: Infinity, 
+                                ease: "linear" 
+                            }}
+                            className="absolute w-1 h-1 rounded-full bg-lumina-blue shadow-[0_0_8px_rgba(30,144,255,0.8)]"
+                        />
+                    ))}
+                    <svg className="absolute inset-0 w-full h-full stroke-lumina-blue/10 stroke-[0.5]" viewBox="0 0 100 100" preserveAspectRatio="none">
+                        <motion.path 
+                            animate={{ opacity: [0.05, 0.15, 0.05] }}
+                            transition={{ duration: 4, repeat: Infinity }}
+                            d="M 10 10 L 90 90 M 10 90 L 90 10 M 50 10 L 50 90 M 10 50 L 90 50 M 20 80 Q 50 20 80 80" 
+                            fill="none"
+                        />
+                    </svg>
+                </div>
+
+                <div className="relative z-10 space-y-4">
+                    <div className="flex items-center gap-4">
+                        <div className="flex items-end gap-1 h-6">
+                            {[0, 1, 2, 3].map(i => (
+                                <motion.div 
+                                    key={i}
+                                    animate={{ 
+                                        height: [8, 24, 8],
+                                        opacity: [0.3, 1, 0.3],
+                                        backgroundColor: ["rgba(30,144,255,0.4)", "rgba(30,144,255,1)", "rgba(30,144,255,0.4)"]
+                                    }}
+                                    transition={{ 
+                                        duration: 1.2, 
+                                        repeat: Infinity, 
+                                        delay: i * 0.15,
+                                        ease: "easeInOut"
+                                    }}
+                                    className="w-1 rounded-full"
+                                />
+                            ))}
+                        </div>
+                        <div className="flex flex-col">
+                            <motion.p 
+                                animate={{ opacity: [0.6, 1, 0.6] }}
+                                transition={{ duration: 2, repeat: Infinity }}
+                                className="text-white text-sm font-light tracking-tight"
+                            >
+                                <span className="opacity-40">Synthesizing</span> Neural Patterns
+                            </motion.p>
+                            <span className="text-[8px] font-black uppercase tracking-widest text-lumina-blue/50">Processing multidimensional logic</span>
+                        </div>
+                    </div>
+                    
+                    {/* Progress indicator */}
+                    <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden relative">
+                        <motion.div 
+                            initial={{ left: '-100%' }}
+                            animate={{ left: '100%' }}
+                            transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+                            className="absolute top-0 bottom-0 w-1/2 bg-gradient-to-r from-transparent via-lumina-blue to-transparent"
+                        />
+                    </div>
+                    
+                    <div className="flex flex-wrap gap-2">
+                        {['Vector Search', 'Logical Inference', 'Syntactic Mapping'].map((step, idx) => (
+                            <motion.div 
+                                key={step}
+                                animate={{ 
+                                    opacity: [0.2, 0.5, 0.2],
+                                    borderColor: ["rgba(255,255,255,0.05)", "rgba(30,144,255,0.3)", "rgba(255,255,255,0.05)"]
+                                }}
+                                transition={{ duration: 3, repeat: Infinity, delay: idx * 0.8 }}
+                                className="px-2 py-0.5 rounded-full border border-white/5 bg-white/[0.02]"
+                            >
+                                <span className="text-[7px] font-bold text-white/40 uppercase tracking-tighter">{step}</span>
+                            </motion.div>
+                        ))}
+                    </div>
+                </div>
+            </div>
+        </motion.div>
+    );
+};
+
 export default function App() {
   const [mode, setMode] = useState<Mode>('search');
   const [query, setQuery] = useState('');
@@ -1917,13 +2051,8 @@ export default function App() {
                   </>
                 )}
                 {isTyping && (
-                    <div className="flex justify-start gap-4" role="status" aria-live="polite">
-                        <div className="w-10 h-10 rounded-full bg-white/10 flex-shrink-0 items-center justify-center p-0.5 animate-pulse border border-white/10">
-                            <Bot size={22} className="text-lumina-blue opacity-50" aria-hidden="true" />
-                        </div>
-                        <div className="glass bg-white/5 border-white/5 px-8 py-5 rounded-[32px] animate-pulse">
-                             <span className="text-xs uppercase tracking-[0.3em] font-black opacity-30 text-white">Neural Synthesis...</span>
-                        </div>
+                    <div className="flex justify-start gap-4 mb-8" role="status" aria-live="polite">
+                        <NeuralProcessingIndicator />
                     </div>
                 )}
                 {/* CRITICAL SCROLL PADDING */}
