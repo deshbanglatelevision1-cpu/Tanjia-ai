@@ -12,7 +12,7 @@ import {
   Plus, Home, Bell, History, Settings, MoreHorizontal, HelpCircle, MessageSquare,
   CloudRain, Zap, Music, PenTool, Layout, ThumbsUp, ThumbsDown,
   Volume2, VolumeX, Copy, Share2, Filter, SlidersHorizontal, Calendar, Download,
-  FileText, FileCode
+  FileText, FileCode, Pencil
 } from 'lucide-react';
 import { chatWithGeminiStream, processImageWithGeminiStream, generateImageWithGemini } from './services/geminiService';
 import { fetchSearchResults, SearchResult } from './services/searchService';
@@ -237,7 +237,7 @@ export default function App() {
   const [filters, setFilters] = useState<{ 
                                     selectedSources: string[], 
                                     dateRange: 'all' | 'today' | 'week' | 'month' | 'year', 
-                                    fileType: 'all' | 'pdf' | 'doc' | 'image', 
+                                    fileType: 'all' | 'pdf' | 'doc' | 'image' | 'html', 
                                     exactMatch: boolean,
                                     author: string,
                                     keyword: string,
@@ -1546,8 +1546,46 @@ export default function App() {
                                         className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border transition-all text-[10px] font-black uppercase tracking-wider ${showFilters ? 'bg-white/10 border-white/20 text-white' : 'border-white/5 text-white/20 hover:text-white/40'}`}
                                     >
                                         <SlidersHorizontal size={12} />
-                                        Refine
+                                        Advanced
                                     </button>
+                                </div>
+                            </div>
+
+                            {/* Quick Refine Pills */}
+                            <div className="flex items-center gap-2 overflow-x-auto pb-4 px-2 no-scrollbar scroll-smooth">
+                                <div className="p-1.5 rounded-lg bg-white/5 border border-white/5 flex items-center gap-2">
+                                    <Sparkles size={10} className="text-lumina-blue" />
+                                    <span className="text-[7px] font-black uppercase tracking-widest text-white/30 whitespace-nowrap">Rapid Refine:</span>
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                    {[
+                                        { label: 'Today', filter: { dateRange: 'today' as const } },
+                                        { label: 'PDFs', filter: { fileType: 'pdf' as const } },
+                                        { label: 'Images', filter: { fileType: 'image' as const } },
+                                        { label: 'Latest', filter: { sortOrder: 'newest' as const } },
+                                        { label: 'Show All', filter: { selectedSources: [], dateRange: 'all' as const, fileType: 'all' as const } }
+                                    ].map((pill, idx) => {
+                                        const isActive = pill.label === 'Show All' 
+                                            ? filters.selectedSources.length === 0 && filters.dateRange === 'all' && filters.fileType === 'all'
+                                            : Object.entries(pill.filter).every(([key, value]) => filters[key as keyof typeof filters] === value);
+                                        
+                                        return (
+                                            <button 
+                                                key={idx}
+                                                onClick={() => {
+                                                    setFilters(prev => ({ ...prev, ...pill.filter }));
+                                                    triggerHaptic('light');
+                                                }}
+                                                className={`px-3 py-1.5 rounded-xl border text-[9px] font-bold whitespace-nowrap transition-all ${
+                                                    isActive
+                                                        ? 'bg-lumina-blue/20 border-lumina-blue/40 text-white shadow-[0_0_15px_rgba(30,144,255,0.2)]' 
+                                                        : 'bg-white/5 border-white/5 text-white/30 hover:text-white/60 hover:bg-white/10'
+                                                }`}
+                                            >
+                                                {pill.label}
+                                            </button>
+                                        );
+                                    })}
                                 </div>
                             </div>
 
@@ -1643,7 +1681,7 @@ export default function App() {
                                                                 onClick={() => setFilters(prev => ({ ...prev, dateRange: range }))}
                                                                 className={`px-3 py-1.5 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all ${filters.dateRange === range ? 'bg-lumina-blue/20 text-white border border-lumina-blue/30' : 'bg-white/5 text-white/20 hover:text-white/40 border border-transparent'}`}
                                                             >
-                                                                {range}
+                                                                {range === 'all' ? 'Any Time' : range === 'today' ? 'Today' : range === 'week' ? 'Past Week' : range === 'month' ? 'Past Month' : 'Past Year'}
                                                             </button>
                                                         ))}
                                                     </div>
@@ -1651,13 +1689,13 @@ export default function App() {
                                                 <div>
                                                     <span className="text-[8px] font-black uppercase tracking-[0.2em] text-white/20 mb-3 block px-1">File Type</span>
                                                     <div className="flex flex-wrap gap-2">
-                                                        {(['all', 'pdf', 'doc', 'image'] as const).map(type => (
+                                                        {(['all', 'pdf', 'doc', 'image', 'html'] as const).map(type => (
                                                             <button 
                                                                 key={type}
                                                                 onClick={() => setFilters(prev => ({ ...prev, fileType: type }))}
                                                                 className={`px-3 py-1.5 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all ${filters.fileType === type ? 'bg-lumina-blue/20 text-white border border-lumina-blue/30' : 'bg-white/5 text-white/20 hover:text-white/40 border border-transparent'}`}
                                                             >
-                                                                {type === 'all' ? 'Any' : type}
+                                                                {type === 'all' ? 'All Formats' : type === 'pdf' ? 'PDF' : type === 'doc' ? 'DOC' : type === 'image' ? 'IMG' : 'HTML'}
                                                             </button>
                                                         ))}
                                                     </div>
@@ -2136,22 +2174,44 @@ export default function App() {
                                                     autoFocus
                                                     value={editText}
                                                     onChange={(e) => setEditText(e.target.value)}
-                                                    className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-base font-medium outline-none focus:border-white/30 h-32 scrollbar-none"
+                                                    onKeyDown={(e) => {
+                                                        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                                                            submitEdit(msg.id);
+                                                        } else if (e.key === 'Escape') {
+                                                            setEditingId(null);
+                                                        }
+                                                    }}
+                                                    className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-base font-medium outline-none focus:border-lumina-pink/40 h-32 scrollbar-none transition-all"
+                                                    placeholder="Edit your prompt..."
                                                 />
-                                                <div className="flex items-center gap-2">
-                                                    <button onClick={() => submitEdit(msg.id)} className="px-4 py-2 bg-white text-black rounded-xl text-xs font-bold hover:bg-white/90 transition-all">Save & Re-prompt</button>
-                                                    <button onClick={() => setEditingId(null)} className="px-4 py-2 glass rounded-xl text-xs font-bold hover:bg-white/5 transition-all text-white/40">Cancel</button>
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-[9px] font-bold text-white/20 uppercase tracking-widest px-1">Ctrl+Enter to save</span>
+                                                    <div className="flex items-center gap-2">
+                                                        <button 
+                                                            onClick={() => setEditingId(null)} 
+                                                            className="px-4 py-2 glass rounded-xl text-xs font-bold hover:bg-white/5 transition-all text-white/40"
+                                                        >
+                                                            Cancel
+                                                        </button>
+                                                        <button 
+                                                            onClick={() => submitEdit(msg.id)} 
+                                                            className="px-4 py-2 bg-white text-black rounded-xl text-xs font-bold hover:bg-white/90 transition-all flex items-center gap-2"
+                                                        >
+                                                            <span>Save & Re-prompt</span>
+                                                            <ArrowRight size={12} />
+                                                        </button>
+                                                    </div>
                                                 </div>
                                             </div>
                                         ) : (
                                             <>
-                                                <div className="text-base font-medium">{msg.content}</div>
+                                                <div className="text-base font-medium leading-relaxed">{msg.content}</div>
                                                 <button 
                                                     onClick={() => { setEditingId(msg.id); setEditText(msg.content); triggerHaptic('light'); }}
-                                                    className="opacity-0 group-hover:opacity-100 p-2 glass rounded-xl text-white/20 hover:text-white transition-all transform translate-x-4"
+                                                    className="opacity-0 group-hover:opacity-100 p-2.5 glass rounded-xl text-white/20 hover:text-white hover:bg-white/10 transition-all transform translate-x-2 shrink-0 self-start"
                                                     title="Edit Message"
                                                 >
-                                                    <PenTool size={14} />
+                                                    <Pencil size={14} />
                                                 </button>
                                             </>
                                         )}
