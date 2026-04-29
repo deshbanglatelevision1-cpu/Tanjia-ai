@@ -1740,10 +1740,11 @@ export default function App() {
                                         initial={{ opacity: 0, y: 15 }}
                                         animate={{ opacity: 1, y: 0 }}
                                         whileHover={{ 
-                                            scale: 1.02, 
-                                            y: -5,
-                                            boxShadow: "0 20px 40px rgba(0,0,0,0.4)",
-                                            borderColor: "rgba(255,255,255,0.3)"
+                                            scale: 1.015, 
+                                            y: -4,
+                                            boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5)",
+                                            borderColor: "rgba(255, 255, 255, 0.45)",
+                                            backgroundColor: "rgba(255, 255, 255, 0.05)"
                                         }}
                                         transition={{ 
                                             duration: 0.4, 
