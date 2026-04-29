@@ -11,7 +11,7 @@ import {
   Monitor, Smartphone, Tablet, RefreshCcw, Menu, Mic, Camera,
   Plus, Home, Bell, History, Settings, MoreHorizontal, HelpCircle,
   CloudRain, Zap, Music, PenTool, Layout, ThumbsUp, ThumbsDown,
-  Volume2, Copy, Share2, Filter, SlidersHorizontal, Calendar, Download,
+  Volume2, VolumeX, Copy, Share2, Filter, SlidersHorizontal, Calendar, Download,
   FileText, FileCode
 } from 'lucide-react';
 import { chatWithGeminiStream, processImageWithGeminiStream, generateImageWithGemini } from './services/geminiService';
@@ -96,6 +96,7 @@ export default function App() {
   const [filteredResults, setFilteredResults] = useState<SearchResult[]>([]);
   const [showFilters, setShowFilters] = useState(false);
   const [showGenSettings, setShowGenSettings] = useState(false);
+  const [imagePromptHistory, setImagePromptHistory] = useState<string[]>([]);
   const [filters, setFilters] = useState<{ 
                                     selectedSources: string[], 
                                     dateRange: 'all' | 'today' | 'week' | 'month' | 'year', 
@@ -223,7 +224,8 @@ export default function App() {
     };
 
     recognition.onresult = (event: any) => {
-      const transcript = event.results[0][0].transcript.toLowerCase().trim();
+      const transcript = (event.results[0][0]?.transcript || '').toLowerCase().trim();
+      if (!transcript) return;
       setQuery(prev => prev + (prev ? " " : "") + transcript);
 
       // Voice Commands
@@ -415,23 +417,23 @@ export default function App() {
     // 4. Exact Match (Simulation)
     if (filters.exactMatch && query.trim()) {
       results = results.filter(r => 
-        r.title.toLowerCase().includes(query.toLowerCase()) || 
-        r.description.toLowerCase().includes(query.toLowerCase())
+        (r.title || '').toLowerCase().includes(query.toLowerCase()) || 
+        (r.description || '').toLowerCase().includes(query.toLowerCase())
       );
     }
 
     // 5. Author Filtering (Simulation)
     if (filters.author.trim()) {
       results = results.filter(r => 
-        r.source.toLowerCase().includes(filters.author.toLowerCase())
+        (r.source || '').toLowerCase().includes(filters.author.toLowerCase())
       );
     }
 
     // 6. Keyword Filtering
     if (filters.keyword.trim()) {
       results = results.filter(r => 
-        r.title.toLowerCase().includes(filters.keyword.toLowerCase()) || 
-        r.content.toLowerCase().includes(filters.keyword.toLowerCase())
+        (r.title || '').toLowerCase().includes(filters.keyword.toLowerCase()) || 
+        (r.content || '').toLowerCase().includes(filters.keyword.toLowerCase())
       );
     }
 
@@ -445,8 +447,13 @@ export default function App() {
       if (query.trim()) {
         const q = query.toLowerCase();
         results.sort((a, b) => {
-          const aCount = (a.title.toLowerCase().match(new RegExp(q, 'g')) || []).length + (a.content.toLowerCase().match(new RegExp(q, 'g')) || []).length;
-          const bCount = (b.title.toLowerCase().match(new RegExp(q, 'g')) || []).length + (b.content.toLowerCase().match(new RegExp(q, 'g')) || []).length;
+          const aTitle = (a.title || '').toLowerCase();
+          const aContent = (a.content || '').toLowerCase();
+          const bTitle = (b.title || '').toLowerCase();
+          const bContent = (b.content || '').toLowerCase();
+
+          const aCount = (aTitle.match(new RegExp(q, 'g')) || []).length + (aContent.match(new RegExp(q, 'g')) || []).length;
+          const bCount = (bTitle.match(new RegExp(q, 'g')) || []).length + (bContent.match(new RegExp(q, 'g')) || []).length;
           return bCount - aCount;
         });
       }
@@ -526,9 +533,9 @@ export default function App() {
       }); // Reset filters on new search
       
       // Save query to history if not empty and not already the most recent one
-      if (query.trim()) {
+      if (query && query.trim()) {
         setSearchQueryHistory(prev => {
-          const filtered = prev.filter(q => q.toLowerCase() !== query.toLowerCase());
+          const filtered = prev.filter(q => q && q.toLowerCase() !== query.toLowerCase());
           return [query, ...filtered].slice(0, 10); // Keep last 10 unique searches
         });
       }
@@ -594,7 +601,7 @@ export default function App() {
     triggerHaptic('medium');
 
     // Detect image generation request
-    const lowerQuery = userMessage.content.toLowerCase();
+    const lowerQuery = (userMessage.content || '').toLowerCase();
     const isImageReq = lowerQuery.startsWith('/image') || 
                        lowerQuery.includes('generate an image') || 
                        lowerQuery.includes('create an image') ||
@@ -626,26 +633,37 @@ export default function App() {
 
         const generatedImageUrl = await generateImageWithGemini(generationPrompt);
         
+        // Save to prompt history
+        setImagePromptHistory(prev => {
+          const filtered = prev.filter(p => p.toLowerCase() !== (generationPrompt || '').toLowerCase());
+          return [generationPrompt, ...filtered].slice(0, 10);
+        });
+
+        const responseText = `Assalamu Alaikum! Here is the image I generated for you based on: "${generationPrompt}"`;
         setMessages(prev => prev.map(m => m.id === aiId ? { 
           ...m, 
-          content: `Assalamu Alaikum! Here is the image I generated for you based on: "${generationPrompt}"`, 
+          content: responseText, 
           image: generatedImageUrl,
           prompt: generationPrompt,
           isStreaming: false 
         } : m));
         
+        if (isAutoSpeak) speakText(responseText, aiId);
         setIsTyping(false);
         triggerHaptic('success');
         return;
       } catch (error) {
         console.error("Image generation failed:", error);
         setIsTyping(false);
+        const errorId = Date.now().toString();
+        const errorMsg = "I apologize, but I encountered an error while generating the image. Please try again with a different description.";
         setMessages(prev => [...prev, { 
-          id: Date.now().toString(), 
+          id: errorId, 
           role: 'model', 
-          content: "I apologize, but I encountered an error while generating the image. Please try again with a different description.", 
+          content: errorMsg, 
           timestamp: new Date() 
         }]);
+        if (isAutoSpeak) speakText(errorMsg, errorId);
         return;
       }
     }
@@ -924,7 +942,7 @@ export default function App() {
                   <div className="flex-1 w-full">
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={[
-                        { name: 'Direct', value: messages.filter(m => !m.content.toLowerCase().includes('refine')).length },
+                        { name: 'Direct', value: messages.filter(m => !(m.content || '').toLowerCase().includes('refine')).length },
                         { name: 'Refined', value: refineUsageCount + 3 },
                         { name: 'Voice', value: 2 }
                       ]}>
@@ -1003,7 +1021,7 @@ export default function App() {
               </div>
 
               <div className="space-y-4 px-2">
-                {chatHistory.filter(t => t.title.toLowerCase().includes(historySearch.toLowerCase())).length === 0 ? (
+                {chatHistory.filter(t => (t.title || '').toLowerCase().includes((historySearch || '').toLowerCase())).length === 0 ? (
                   <div className="py-32 text-center glass rounded-[48px] border-dashed border-white/5 bg-white/[0.02]">
                     <div className="w-20 h-20 bg-white/5 rounded-full flex items-center justify-center mx-auto mb-6">
                       <History size={40} className="text-white/10" />
@@ -1018,7 +1036,7 @@ export default function App() {
                   </div>
                 ) : (
                   chatHistory
-                    .filter(t => t.title.toLowerCase().includes(historySearch.toLowerCase()))
+                    .filter(t => (t.title || '').toLowerCase().includes((historySearch || '').toLowerCase()))
                     .map((thread) => (
                     <motion.div 
                       key={thread.id}
@@ -1439,8 +1457,15 @@ export default function App() {
                             </AnimatePresence>
 
                             {filteredResults.length > 0 ? (
-                                filteredResults.map(res => (
-                                    <div key={res.id} onClick={() => setActiveUrl(res.url)} className="glass p-6 rounded-[32px] border-white/10 hover:border-white/30 transition-all cursor-pointer group">
+                                filteredResults.map((res, i) => (
+                                    <motion.div 
+                                        key={res.id} 
+                                        initial={{ opacity: 0, y: 15 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        transition={{ duration: 0.4, delay: i * 0.05 }}
+                                        onClick={() => setActiveUrl(res.url)} 
+                                        className="glass p-6 rounded-[32px] border-white/10 hover:border-white/30 transition-all cursor-pointer group"
+                                    >
                                         <div className="flex items-center justify-between mb-1">
                                             <div className="flex items-center gap-2">
                                                 <span className="text-[9px] uppercase tracking-widest font-bold text-lumina-blue group-hover:text-blue-300 transition-colors">{res.source}</span>
@@ -1457,7 +1482,7 @@ export default function App() {
                                         </div>
                                         <h3 className="text-lg font-bold mb-2 group-hover:underline underline-offset-4">{res.title}</h3>
                                         <p className="text-sm text-white/60 font-light line-clamp-2">{res.description}</p>
-                                    </div>
+                                    </motion.div>
                                 ))
                             ) : (
                                 <div className="py-12 text-center glass rounded-[32px] border-white/5">
@@ -1484,7 +1509,7 @@ export default function App() {
                                 <span className="text-[10px] font-black uppercase tracking-[0.3em] text-white/20">Related Session Paths</span>
                              </div>
                              <div className="flex flex-col gap-2">
-                                {searchQueryHistory.filter(h => h.toLowerCase() !== query.toLowerCase()).slice(0, 3).map((hQuery, idx) => (
+                                {searchQueryHistory.filter(h => h && h.toLowerCase() !== (query || '').toLowerCase()).slice(0, 3).map((hQuery, idx) => (
                                     <button
                                         key={hQuery}
                                         onClick={() => triggerConfirmSearch(hQuery)}
@@ -1693,8 +1718,8 @@ export default function App() {
                                                         <ThumbsDown size={14} fill={msg.feedback === 'negative' ? 'currentColor' : 'none'} />
                                                     </motion.button>
                                                 </div>
-                                                <button onClick={() => speakText(msg.content, msg.id)} className={`p-2.5 rounded-xl transition-all ${speakingMessageId === msg.id ? 'bg-lumina-blue/20 text-lumina-blue' : 'text-white/30 hover:bg-white/10 hover:text-blue-400'}`} aria-label="Listen to response">
-                                                    <Volume2 size={14} />
+                                                <button onClick={() => speakText(msg.content, msg.id)} className={`p-2.5 rounded-xl transition-all ${speakingMessageId === msg.id ? 'bg-lumina-blue/20 text-lumina-blue ring-2 ring-lumina-blue/30' : 'text-white/30 hover:bg-white/10 hover:text-blue-400'}`} aria-label={speakingMessageId === msg.id ? "Stop listening" : "Listen to response"}>
+                                                    {speakingMessageId === msg.id ? <VolumeX size={14} className="animate-bounce" /> : <Volume2 size={14} />}
                                                 </button>
                                                 <button onClick={() => copyToClipboard(msg.content)} className="p-2.5 hover:bg-white/10 rounded-xl transition-all text-white/30 hover:text-white" aria-label="Copy to clipboard">
                                                     <Copy size={14} />
@@ -2006,6 +2031,36 @@ export default function App() {
                                         ))}
                                     </div>
                                 </div>
+
+                                <div>
+                                    <span className="text-[8px] font-black uppercase tracking-[0.2em] text-white/30 mb-2 block">Neural Features</span>
+                                    <button 
+                                        onClick={() => { setIsAutoSpeak(!isAutoSpeak); triggerHaptic('light'); }}
+                                        className={`w-full py-2.5 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all border flex items-center justify-center gap-2 ${isAutoSpeak ? 'bg-lumina-pink/20 text-white border-lumina-pink/40' : 'bg-white/5 text-white/40 border-transparent hover:border-white/10'}`}
+                                    >
+                                        {isAutoSpeak ? <Volume2 size={12} className="animate-pulse" /> : <VolumeX size={12} />}
+                                        {isAutoSpeak ? 'Auto-Speech Active' : 'Auto-Speech Muted'}
+                                    </button>
+                                </div>
+
+                                {imagePromptHistory.length > 0 && (
+                                    <div className="pt-4 border-t border-white/5">
+                                        <span className="text-[8px] font-black uppercase tracking-[0.2em] text-white/30 mb-3 block">Past Prompts</span>
+                                        <div className="flex flex-col gap-2 max-h-[160px] overflow-y-auto pr-2 custom-scrollbar">
+                                            {imagePromptHistory.map((prompt, idx) => (
+                                                <button 
+                                                    key={idx}
+                                                    onClick={() => { setQuery(prompt); triggerHaptic('light'); }}
+                                                    className="text-left p-3 rounded-xl bg-white/5 hover:bg-white/10 transition-all group/pitem border border-transparent hover:border-white/10"
+                                                >
+                                                    <p className="text-[10px] text-white/60 group-hover/pitem:text-white line-clamp-2 leading-relaxed italic">
+                                                        "{prompt}"
+                                                    </p>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         </motion.div>
                     )}
