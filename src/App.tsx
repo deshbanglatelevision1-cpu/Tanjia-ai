@@ -393,51 +393,62 @@ export default function App() {
     };
 
     recognition.onresult = (event: any) => {
-      const transcript = (event.results[0][0]?.transcript || '').toLowerCase().trim();
+      const transcript = (event.results[event.results.length - 1][0]?.transcript || '').toLowerCase().trim();
       if (!transcript) return;
-      setQuery(prev => prev + (prev ? " " : "") + transcript);
+      
+      let isCommand = false;
 
       // Voice Commands
-      if (transcript.includes('go home') || transcript.includes('switch to home')) {
+      if (transcript === 'go home' || transcript === 'switch to home') {
         setActiveTab('home');
         triggerHaptic('success');
-      } else if (transcript.includes('show search') || transcript.includes('switch to search')) {
+        isCommand = true;
+      } else if (transcript === 'show search' || transcript === 'switch to search') {
         setActiveTab('home');
         setMode('search');
         triggerHaptic('success');
-      } else if (transcript.includes('show history') || transcript.includes('show memory') || transcript.includes('switch to history')) {
+        isCommand = true;
+      } else if (transcript === 'show history' || transcript === 'show memory' || transcript === 'switch to history') {
         setActiveTab('history');
         triggerHaptic('success');
-      } else if (transcript.includes('new chat') || transcript.includes('start new conversation')) {
+        isCommand = true;
+      } else if (transcript === 'new chat' || transcript === 'start new conversation') {
         startNewChat();
         setActiveTab('home');
         setMode('ai');
         triggerHaptic('success');
-      } else if (transcript.includes('thinking mode fast')) {
+        isCommand = true;
+      } else if (transcript === 'thinking mode fast') {
         setThinkingMode('fast');
         triggerHaptic('success');
-      } else if (transcript.includes('thinking mode pro')) {
+        isCommand = true;
+      } else if (transcript === 'thinking mode pro') {
         setThinkingMode('pro');
         triggerHaptic('success');
-      } else if (transcript.includes('thinking mode deep') || transcript.includes('enable deep think')) {
+        isCommand = true;
+      } else if (transcript === 'thinking mode deep') {
         setThinkingMode('think');
         triggerHaptic('success');
-      } else if (transcript.includes('voice on')) {
+        isCommand = true;
+      } else if (transcript === 'voice on') {
         setIsAutoSpeak(true);
         triggerHaptic('success');
-      } else if (transcript.includes('voice off')) {
+        isCommand = true;
+      } else if (transcript === 'voice off') {
         setIsAutoSpeak(false);
         triggerHaptic('success');
-      } else if (transcript.includes('generate an image') || transcript.includes('create an image') || transcript.includes('draw an image')) {
+        isCommand = true;
+      } else if (transcript === 'generate an image' || transcript === 'create an image' || transcript === 'draw an image') {
         setMode('ai');
         setActiveTab('home');
-        // We use a timeout to let the setQuery (done before this) reflect
+        setQuery(transcript);
         setTimeout(() => {
           handleSend();
         }, 300);
         triggerHaptic('success');
-      } else if (transcript.includes('search for')) {
-        const queryTerm = transcript.split('search for')[1]?.trim();
+        isCommand = true;
+      } else if (transcript.startsWith('search for ')) {
+        const queryTerm = transcript.replace('search for ', '').trim();
         if (queryTerm) {
           setQuery(queryTerm);
           setMode('search');
@@ -446,10 +457,16 @@ export default function App() {
             handleSend();
           }, 300);
           triggerHaptic('success');
+          isCommand = true;
         }
-      } else if (transcript.includes('send message')) {
+      } else if (transcript === 'send message') {
         handleSend();
         triggerHaptic('success');
+        isCommand = true;
+      }
+
+      if (!isCommand) {
+        setQuery(prev => prev + (prev ? " " : "") + transcript);
       }
     };
 
@@ -659,14 +676,15 @@ export default function App() {
     if (index === -1) return;
     
     const newMessages = messages.slice(0, index);
+    const editedText = editText;
+    
     setMessages(newMessages);
-    setQuery(editText);
+    setQuery(editedText);
     setEditingId(null);
     setEditText('');
     
-    setTimeout(() => {
-      handleSend();
-    }, 100);
+    // Pass the new history directly to handleSend to avoid stale state issues
+    handleSend(newMessages, editedText);
   };
 
   const triggerConfirmSearch = (q: string) => {
@@ -678,12 +696,12 @@ export default function App() {
     }, 50);
   };
 
-  const handleSend = async () => {
-    if (!query.trim() && !selectedImage) return;
-    setLastExecutedQuery(query);
+  const handleSend = async (overrideHistory?: Message[], overrideQuery?: string) => {
+    const activeQuery = overrideQuery !== undefined ? overrideQuery : query;
+    if (!activeQuery.trim() && !selectedImage) return;
+    
+    setLastExecutedQuery(activeQuery);
     triggerHaptic('medium');
-
-    let effectiveQuery = query;
 
     if (mode === 'search') {
       setIsSearching(true);
@@ -703,15 +721,15 @@ export default function App() {
       }); // Reset filters on new search
       
       // Save query to history if not empty and not already the most recent one
-      if (query && query.trim()) {
+      if (activeQuery && activeQuery.trim()) {
         setSearchQueryHistory(prev => {
-          const filtered = prev.filter(q => q && q.toLowerCase() !== query.toLowerCase());
-          return [query, ...filtered].slice(0, 10); // Keep last 10 unique searches
+          const filtered = prev.filter(q => q && q.toLowerCase() !== activeQuery.toLowerCase());
+          return [activeQuery, ...filtered].slice(0, 10); // Keep last 10 unique searches
         });
       }
       
       try {
-        let searchQuery = query;
+        let searchQuery = activeQuery;
 
         // Handle Image in Search Mode (simulating Google Lens)
         if (selectedImage) {
@@ -719,7 +737,7 @@ export default function App() {
           const stream = await processImageWithGeminiStream("Generate a short, relevant search query for this image. Output ONLY the query text.", base64Data, selectedImage.type);
           let aiQuery = '';
           for await (const chunk of stream) { aiQuery += chunk.text || ""; }
-          searchQuery = aiQuery.trim() || query;
+          searchQuery = aiQuery.trim() || activeQuery;
         }
 
         // 1. Fetch AI OVERVIEW (Streaming)
@@ -759,16 +777,20 @@ export default function App() {
     const userMessage: Message = {
       id: Date.now().toString(),
       role: 'user',
-      content: query,
+      content: activeQuery,
       image: selectedImage?.data,
       timestamp: new Date(),
     };
 
-    setMessages(prev => [...prev, userMessage]);
-    setQuery('');
+    // Use overrideHistory if provided, otherwise use current messages
+    const baseMessages = overrideHistory || messages;
+    setMessages([...baseMessages, userMessage]);
+    
+    if (overrideQuery === undefined) setQuery('');
     setSelectedImage(null);
     setIsTyping(true);
-    triggerHaptic('medium');
+
+    let effectiveQuery = activeQuery;
 
     // Detect image generation request
     const lowerQuery = (userMessage.content || '').toLowerCase();
@@ -851,7 +873,7 @@ export default function App() {
         const mimeType = userMessage.image.split(';')[0].split(':')[1] || 'image/png';
         stream = await processImageWithGeminiStream(`${systemContext} ${userMessage.content || "Analyze this file"}`, base64Data, mimeType);
       } else {
-        const history = messages.map(m => ({
+        const history = baseMessages.map(m => ({
           role: m.role,
           parts: [{ text: m.content }]
         }));
@@ -1290,7 +1312,7 @@ export default function App() {
                             >
                                 <Mic size={20} />
                             </button>
-                            <button onClick={handleSend} className="p-3 bg-lumina-gradient text-white rounded-2xl hover:scale-105 active:scale-95 transition-all shadow-xl" aria-label="Submit search">
+                            <button onClick={() => handleSend()} className="p-3 bg-lumina-gradient text-white rounded-2xl hover:scale-105 active:scale-95 transition-all shadow-xl" aria-label="Submit search">
                                 <ArrowRight size={20} strokeWidth={3} />
                             </button>
                         </div>
@@ -1406,7 +1428,7 @@ export default function App() {
                                 <Bot size={14} className="text-blue-400" />
                                 <span className="text-[10px] font-black uppercase tracking-[0.3em] text-blue-400">AI OVERVIEW</span>
                             </div>
-                            <div className="prose prose-invert max-w-none text-white/90 leading-relaxed text-lg font-light">
+                            <div className="prose prose-invert max-w-none text-white/90 leading-relaxed text-xl font-light">
                                 {messages[0].content}
                                 {messages[0].isStreaming && <span className="inline-block w-2 h-5 bg-blue-400/50 ml-2 animate-pulse align-middle" />}
                             </div>
@@ -1881,10 +1903,10 @@ export default function App() {
               <div className="flex-1 space-y-8 pb-12 pr-2">
                 {messages.length === 0 ? (
                   <div className="space-y-12 mb-20 text-center sm:text-left">
-                    <h2 className="text-4xl md:text-6xl font-black tracking-tight leading-loose md:leading-[1.1]">
-                        <span className="opacity-40 font-light block mb-2 text-2xl">Lumina Engine v4.0</span>
+                    <h2 className="text-3xl md:text-5xl font-black tracking-tight leading-loose md:leading-[1.1]">
+                        <span className="opacity-40 font-light block mb-2 text-xl">Lumina Engine v4.0</span>
                         <span className="animate-magic-text font-black">TANJIA AI</span><br />
-                        <span className="opacity-80 text-3xl">Infinite Possibilities.</span>
+                        <span className="opacity-80 text-2xl">Infinite Possibilities.</span>
                     </h2>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-2xl mx-auto sm:mx-0">
                         {[
@@ -2020,7 +2042,7 @@ export default function App() {
                                                 </p>
                                             </div>
                                         )}
-                                        <div className="text-lg md:text-xl font-light leading-relaxed text-white/90">
+                                        <div className="text-xl md:text-2xl font-light leading-relaxed text-white/90">
                                             {msg.content}
                                             {msg.isStreaming && <span className="inline-block w-1.5 h-5 bg-lumina-blue ml-2 animate-pulse align-middle" />}
                                         </div>
@@ -2205,7 +2227,7 @@ export default function App() {
                                             </div>
                                         ) : (
                                             <>
-                                                <div className="text-base font-medium leading-relaxed">{msg.content}</div>
+                                                <div className="text-sm font-medium leading-relaxed">{msg.content}</div>
                                                 <button 
                                                     onClick={() => { setEditingId(msg.id); setEditText(msg.content); triggerHaptic('light'); }}
                                                     className="opacity-0 group-hover:opacity-100 p-2.5 glass rounded-xl text-white/20 hover:text-white hover:bg-white/10 transition-all transform translate-x-2 shrink-0 self-start"
@@ -2567,7 +2589,7 @@ export default function App() {
                             <Mic size={20} />
                         </button>
                         <button 
-                            onClick={handleSend} 
+                            onClick={() => handleSend()} 
                             className="p-3 bg-lumina-gradient text-white rounded-2xl hover:brightness-110 active:scale-95 transition-all shadow-lg flex-shrink-0"
                             aria-label={mode === 'search' ? "Search" : "Send message"}
                         >
