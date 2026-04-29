@@ -243,7 +243,7 @@ export default function App() {
                                     keyword: string,
                                     sortOrder: 'relevance' | 'newest' | 'oldest',
                                     aspectRatio: '1:1' | '16:9' | '9:16',
-                                    artStyle: 'none' | 'photorealistic' | 'abstract' | 'cartoon' | 'cyberpunk'
+                                    artStyle: 'none' | 'photorealistic' | 'abstract' | 'cartoon' | 'cyberpunk' | 'sketch' | 'oil-painting' | '3d-render' | 'pixel-art' | 'steampunk'
                                   }>({ 
                                     selectedSources: [], 
                                     dateRange: 'all', 
@@ -2365,14 +2365,14 @@ export default function App() {
 
                                 <div>
                                     <span className="text-[8px] font-black uppercase tracking-[0.2em] text-white/30 mb-2 block">Visual Style</span>
-                                    <div className="grid grid-cols-3 gap-2">
-                                        {(['none', 'photorealistic', 'abstract', 'cartoon', 'cyberpunk'] as const).map(style => (
+                                    <div className="grid grid-cols-3 md:grid-cols-5 gap-2">
+                                        {(['none', 'photorealistic', 'sketch', 'oil-painting', 'abstract', 'cartoon', 'pixel-art', '3d-render', 'cyberpunk', 'steampunk'] as const).map(style => (
                                             <button 
                                                 key={style}
                                                 onClick={() => { setFilters(prev => ({ ...prev, artStyle: style })); triggerHaptic('light'); }}
-                                                className={`py-2 rounded-xl text-[9px] font-bold uppercase tracking-widest transition-all border ${filters.artStyle === style ? 'bg-lumina-blue/20 text-white border-lumina-blue/40' : 'bg-white/5 text-white/40 border-transparent hover:border-white/10'}`}
+                                                className={`py-2 rounded-xl text-[9px] font-bold uppercase tracking-widest transition-all border ${filters.artStyle === style ? 'bg-lumina-blue/20 text-white border-lumina-blue/40 shadow-[0_0_10px_rgba(30,144,255,0.3)]' : 'bg-white/5 text-white/40 border-transparent hover:border-white/10'}`}
                                             >
-                                                {style}
+                                                {style.split('-').join(' ')}
                                             </button>
                                         ))}
                                     </div>
@@ -2468,25 +2468,57 @@ export default function App() {
                         initial={{ opacity: 0, y: 10, scale: 0.95 }}
                         animate={{ opacity: 1, y: 0, scale: 1 }}
                         exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                        className="absolute bottom-full mb-3 left-0 right-0 glass-dark p-2 rounded-2xl border-white/10 shadow-2xl backdrop-blur-3xl mx-2 z-50 flex flex-col gap-2"
+                        className="absolute bottom-full mb-3 left-0 right-0 glass-dark p-3 rounded-2xl border-white/10 shadow-2xl backdrop-blur-3xl mx-2 z-50 flex flex-col gap-3"
                     >
-                        <div className="flex items-center justify-between px-2 pt-1">
-                            <div className="flex items-center gap-1.5">
-                                <ImageIcon size={10} className="text-lumina-blue" />
-                                <span className="text-[8px] font-black uppercase tracking-[0.2em] text-white/40 leading-none">Generation Context: Aspect Ratio</span>
+                        <div className="space-y-2">
+                             <div className="flex items-center justify-between px-1">
+                                <div className="flex items-center gap-1.5">
+                                    <Layout size={10} className="text-lumina-blue" />
+                                    <span className="text-[8px] font-black uppercase tracking-[0.2em] text-white/40 leading-none">Aspect Ratio</span>
+                                </div>
+                                <span className="text-[10px] font-bold text-lumina-blue/80">{filters.aspectRatio}</span>
                             </div>
-                            <span className="text-[10px] font-bold text-lumina-blue/80">{filters.aspectRatio}</span>
+                            <div className="flex gap-1.5 p-1 bg-white/5 rounded-xl">
+                                {(['1:1', '16:9', '9:16'] as const).map(ratio => (
+                                    <button 
+                                        key={ratio}
+                                        onClick={() => { setFilters(prev => ({ ...prev, aspectRatio: ratio })); triggerHaptic('light'); }}
+                                        className={`flex-1 py-2 rounded-lg text-[10px] font-black tracking-widest transition-all border ${filters.aspectRatio === ratio ? 'bg-lumina-blue/20 text-white border-lumina-blue/40 shadow-[0_0_15px_rgba(30,144,255,0.2)]' : 'text-white/30 border-transparent hover:bg-white/5 hover:text-white/60'}`}
+                                    >
+                                        {ratio}
+                                    </button>
+                                ))}
+                            </div>
                         </div>
-                        <div className="flex gap-1.5 p-1 bg-white/5 rounded-xl">
-                            {(['1:1', '16:9', '9:16'] as const).map(ratio => (
-                                <button 
-                                    key={ratio}
-                                    onClick={() => { setFilters(prev => ({ ...prev, aspectRatio: ratio })); triggerHaptic('light'); }}
-                                    className={`flex-1 py-2 rounded-lg text-[10px] font-black tracking-widest transition-all border ${filters.aspectRatio === ratio ? 'bg-lumina-blue/20 text-white border-lumina-blue/40 shadow-[0_0_15px_rgba(30,144,255,0.2)]' : 'text-white/30 border-transparent hover:bg-white/5 hover:text-white/60'}`}
-                                >
-                                    {ratio}
-                                </button>
-                            ))}
+
+                         <div className="space-y-2">
+                             <div className="flex items-center justify-between px-1">
+                                <div className="flex items-center gap-1.5">
+                                    <PenTool size={10} className="text-lumina-pink" />
+                                    <span className="text-[8px] font-black uppercase tracking-[0.2em] text-white/40 leading-none">Art Style</span>
+                                </div>
+                                <span className="text-[10px] font-bold text-lumina-pink/80 uppercase">{filters.artStyle}</span>
+                            </div>
+                            <div className="grid grid-cols-5 gap-1.5 p-1 bg-white/5 rounded-xl">
+                                {(['none', 'photorealistic', 'sketch', 'oil-painting', 'abstract', 'cartoon', 'pixel-art', '3d-render', 'cyberpunk', 'steampunk'] as const).map(style => (
+                                    <button 
+                                        key={style}
+                                        onClick={() => { setFilters(prev => ({ ...prev, artStyle: style })); triggerHaptic('light'); }}
+                                        className={`py-2 rounded-lg text-[8px] font-black tracking-tighter transition-all border uppercase ${filters.artStyle === style ? 'bg-lumina-pink/20 text-white border-lumina-pink/40 shadow-[0_0_15px_rgba(255,105,180,0.2)]' : 'text-white/30 border-transparent hover:bg-white/5 hover:text-white/60'}`}
+                                        title={style}
+                                    >
+                                        {style === 'none' ? 'Def' : 
+                                         style === 'photorealistic' ? 'Real' : 
+                                         style === 'sketch' ? 'Skch' :
+                                         style === 'oil-painting' ? 'Oil' :
+                                         style === 'abstract' ? 'Abs' : 
+                                         style === 'cartoon' ? 'Toon' : 
+                                         style === 'pixel-art' ? 'Pix' :
+                                         style === '3d-render' ? '3D' :
+                                         style === 'cyberpunk' ? 'Cyber' : 'Steam'}
+                                    </button>
+                                ))}
+                            </div>
                         </div>
                     </motion.div>
                 )}
@@ -2507,7 +2539,13 @@ export default function App() {
                             className={`p-2.5 rounded-xl transition-all ${showGenSettings ? 'text-lumina-blue bg-lumina-blue/10' : 'text-white/30 hover:text-white hover:bg-white/10'} group/tune`}
                             title="Generation Settings"
                         >
-                            <SlidersHorizontal size={ 18 } className="group-hover/tune:rotate-90 transition-transform duration-500" />
+                            {(query.toLowerCase().startsWith('/image') || query.toLowerCase().includes('generate an image') || query.toLowerCase().includes('create an image')) ? (
+                                <motion.div animate={{ scale: [1, 1.2, 1] }} transition={{ duration: 2, repeat: Infinity }}>
+                                    <ImageIcon size={ 18 } className="text-lumina-blue" />
+                                </motion.div>
+                            ) : (
+                                <SlidersHorizontal size={ 18 } className="group-hover/tune:rotate-90 transition-transform duration-500" />
+                            )}
                         </button>
                     )}
                     
