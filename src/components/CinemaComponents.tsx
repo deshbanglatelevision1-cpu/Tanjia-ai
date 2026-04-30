@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   Heart, MessageCircle, Share2, Bookmark, Play, Pause, Volume2, VolumeX, 
   Sparkles, Send, X, MoreVertical, ThumbsUp, ThumbsDown, CheckCircle, 
-  ArrowLeft, Search, Filter, Plus, UserPlus, PlayCircle, Mail
+  ArrowLeft, Search, Filter, Plus, UserPlus, PlayCircle, Mail, Users
 } from 'lucide-react';
 
 interface Video {
@@ -268,6 +268,16 @@ const ShortsCard = ({ video, onOpenAI }: { video: Video, onOpenAI: (v: Video) =>
         muted={isMuted}
         playsInline
         onClick={togglePlay}
+        onError={(e) => {
+          const videoTarget = e.currentTarget;
+          console.error("Neural Cinema: Video source error", {
+            src: videoTarget.src,
+            error: videoTarget.error ? {
+              code: videoTarget.error.code,
+              message: videoTarget.error.message
+            } : "Unknown error"
+          });
+        }}
       />
 
       {/* Play/Pause Button Animation (Center) */}

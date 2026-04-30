@@ -68,7 +68,7 @@ const MOCK_VIDEOS: Video[] = [
     id: 's1',
     type: 'short',
     creator: { id: 'u1', name: 'CyberTanjia', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Tanjia' },
-    url: 'https://assets.mixkit.co/videos/preview/mixkit-futuristic-urban-cityscape-at-night-40228-large.mp4',
+    url: 'https://videos.pexels.com/video-files/3129671/3129671-sd_360_640_30fps.mp4',
     thumbnail: 'https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=800',
     title: 'Neon Dreams: The AI Future',
     description: 'Exploring the neon-lit streets of the neural network.',
@@ -79,7 +79,7 @@ const MOCK_VIDEOS: Video[] = [
     id: 's2',
     type: 'short',
     creator: { id: 'u2', name: 'NeuralCore', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Core' },
-    url: 'https://assets.mixkit.co/videos/preview/mixkit-bubbles-of-water-rising-in-slow-motion-42683-large.mp4',
+    url: 'https://vjs.zencdn.net/v/oceans.mp4',
     thumbnail: 'https://images.unsplash.com/photo-1620641788421-7a1c342ea42e?w=800',
     title: 'Abstract Synthesis',
     description: 'When the AI starts dreaming of fluid dynamics.',
@@ -90,10 +90,10 @@ const MOCK_VIDEOS: Video[] = [
     id: 'l1',
     type: 'long',
     creator: { id: 'u1', name: 'CyberTanjia', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Tanjia' },
-    url: 'https://assets.mixkit.co/videos/preview/mixkit-winter-fashion-cold-outfit-430-large.mp4',
+    url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
     thumbnail: 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=800',
     title: 'Full Length Documentary: The Era of Neural Cinema',
-    description: 'A deep dive into how generative AI is transforming the way we consume and create motion pictures. Featuring interviews with top architects.',
+    description: 'A deep dive into how generative AI is transforming the way we consume and create motion pictures.',
     stats: { views: '2.5M', likes: '300K', comments: '25K' },
     tags: ['documentary', 'cinema', 'tech-deep-dive']
   }
@@ -1380,17 +1380,17 @@ export default function App() {
             <div className="max-w-7xl mx-auto h-full px-4 md:px-8">
               <AnimatePresence mode="wait">
                 {activeTab === 'cinema' && (
-                  <motion.div key="cinema" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="h-full pt-8 pb-32">
+                  <motion.div key="cinema" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="h-full pt-8 pb-48">
                     {renderTabContent()}
                   </motion.div>
                 )}
                 {activeTab === 'inbox' && (
-                  <motion.div key="inbox" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="h-full pt-8 pb-32">
+                  <motion.div key="inbox" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="h-full pt-8 pb-48">
                     {renderTabContent()}
                   </motion.div>
                 )}
                 {activeTab === 'profile' && (
-                  <motion.div key="profile" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="h-full pt-8 pb-32">
+                  <motion.div key="profile" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="h-full pt-8 pb-48">
                     {renderTabContent()}
                   </motion.div>
                 )}
@@ -1400,7 +1400,7 @@ export default function App() {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -20 }}
-              className="max-w-4xl mx-auto space-y-8 pt-8 px-6 pb-32"
+              className="max-w-4xl mx-auto space-y-8 pt-8 px-6 pb-48"
             >
               <div className="flex flex-col gap-1 mb-8">
                 <h2 className="text-4xl font-black tracking-tighter">Neural Insights</h2>
@@ -1584,7 +1584,7 @@ export default function App() {
               <div className="h-48 invisible" />
             </motion.div>
           )}
-          {activeTab === 'home' && mode === 'search' && (
+          {(activeTab === 'home' || activeTab === 'search') && mode === 'search' && (
             <motion.div 
               key="search-mode"
               initial={{ opacity: 0, x: -20 }}
@@ -2212,7 +2212,7 @@ export default function App() {
               )}
             </motion.div>
           )}
-          {activeTab === 'home' && mode === 'ai' && (
+          {(activeTab === 'home' || activeTab === 'search') && mode === 'ai' && (
             /* AI Mode View */
             <motion.div 
               key="ai-mode"
@@ -2582,13 +2582,13 @@ export default function App() {
 
       {/* Floating Bottom Input Area - ANIMATED */}
       <AnimatePresence>
-        {(activeTab === 'search' || mode === 'ai') && (
+        {(['home', 'search', 'inbox'].includes(activeTab as string)) && (
           <motion.div 
             initial={{ y: 200, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 200, opacity: 0 }}
             transition={{ type: 'spring', damping: 30, stiffness: 300 }}
-            className="fixed bottom-[100px] left-0 right-0 z-[55] px-4 flex flex-col items-center pointer-events-none"
+            className="fixed bottom-[104px] left-0 right-0 z-[55] px-4 flex flex-col items-center pointer-events-none"
           >
             <div className="w-full max-w-xl flex flex-col gap-3 pointer-events-auto">
                 <div className="flex items-center justify-between px-2">
@@ -2684,7 +2684,7 @@ export default function App() {
 
       {/* FIXED ROOT BOTTOM NAVIGATION - Always Visible */}
       <div className="fixed bottom-0 left-0 right-0 z-[60] flex flex-col items-center pointer-events-none pb-[env(safe-area-inset-bottom,16px)] mb-4">
-        <nav className="w-full max-w-sm h-16 glass-dark rounded-full flex items-center justify-around px-4 border border-white/10 shadow-2xl backdrop-blur-3xl pointer-events-auto">
+        <nav className="w-full max-w-sm h-16 glass-dark rounded-full flex items-center justify-around px-4 border border-white/10 shadow-2xl backdrop-blur-3xl pointer-events-auto" role="tablist" aria-label="Main Navigation">
             {[
                 { id: 'cinema', icon: Film, label: 'Cinema' },
                 { id: 'search', icon: Search, label: 'Search' },
@@ -2699,11 +2699,16 @@ export default function App() {
                         onClick={() => { 
                           setActiveTab(tab.id as any);
                           if (tab.id === 'search') setMode('search');
+                          if (tab.id === 'home') setMode('ai');
                           triggerHaptic('light');
                         }}
+                        id={`tab-${tab.id}`}
+                        role="tab"
+                        aria-selected={isActive}
+                        aria-controls="main-content"
                         className={`flex flex-col items-center justify-center gap-1 transition-all relative px-3 py-1 rounded-2xl ${isActive ? 'text-lumina-blue bg-white/5 shadow-inner' : 'text-white/20 hover:text-white/40'}`}
                     >
-                        <tab.icon size={isActive ? 22 : 20} strokeWidth={isActive ? 2.5 : 2} className="transition-all" />
+                        <tab.icon size={isActive ? 22 : 20} strokeWidth={isActive ? 2.5 : 2} className="transition-all" aria-hidden="true" />
                         <span className={`text-[8px] font-black uppercase tracking-tighter transition-all ${isActive ? 'opacity-100' : 'opacity-0 h-0 w-0 overflow-hidden'}`}>{tab.label}</span>
                         {isActive && <motion.div layoutId="footer-tab" className="absolute -bottom-1 w-1 h-1 bg-lumina-blue rounded-full shadow-[0_0_8px_rgba(30,144,255,0.6)]" />}
                     </button>
