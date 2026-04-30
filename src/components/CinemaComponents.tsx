@@ -3,8 +3,11 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   Heart, MessageCircle, Share2, Bookmark, Play, Pause, Volume2, VolumeX, 
   Sparkles, Send, X, MoreVertical, ThumbsUp, ThumbsDown, CheckCircle, 
-  ArrowLeft, Search, Filter, Plus, UserPlus, PlayCircle, Mail, Users
+  ArrowLeft, Search, Filter, Plus, UserPlus, PlayCircle, Mail, Users,
+  RefreshCcw, ArrowRight
 } from 'lucide-react';
+import { LongFormVideoPlayer } from './LongFormVideoPlayer';
+import { ShareModal } from './ShareModal';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { User as FirebaseUser } from 'firebase/auth';
@@ -43,6 +46,10 @@ interface CinemaSectionProps {
   onOpenAI: (video: Video) => void;
   selectedVideo: Video | null;
   onSelectVideo: (video: Video | null) => void;
+  onLoadMore?: () => void;
+  isLoadingMore?: boolean;
+  onRefresh?: () => void;
+  onUploadVideo?: () => void;
 }
 
 // Dedicated Upload Progress Bar Component
@@ -97,98 +104,181 @@ const UploadProgressBar = ({ progress, onCancel }: { progress: number, onCancel:
 
 export const CinemaSection: React.FC<CinemaSectionProps> = ({ 
   viewMode, setViewMode, videos, user, searchMode, searchQuery, onResetSearch, onOpenAI,
-  selectedVideo, onSelectVideo
+  selectedVideo, onSelectVideo, onLoadMore, isLoadingMore, onRefresh, onUploadVideo
 }) => {
-  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [localSearch, setLocalSearch] = useState('');
+  const [sortOption, setSortOption] = useState<'relevance' | 'views' | 'likes'>('relevance');
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   
-  const handleSimulateUpload = () => {
-    setUploadProgress(0);
-    const interval = setInterval(() => {
-      setUploadProgress(prev => {
-        if (prev === null || prev >= 100) {
-          clearInterval(interval);
-          setTimeout(() => setUploadProgress(null), 1000);
-          return 100;
-        }
-        return prev + 5;
-      });
-    }, 150);
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
+    
+    // Infinite load detection
+    if (scrollHeight - scrollTop <= clientHeight + 100 && onLoadMore && !isLoadingMore) {
+      onLoadMore();
+    }
+    
+    // Up scroll reload (Pull to refresh simulation via threshold)
+    if (scrollTop < -50 && onRefresh && !isRefreshing) {
+      handleRefresh();
+    }
+  };
+
+  const clearSearch = () => {
+    setLocalSearch('');
+    // Optionally trigger onResetSearch if it's meant for global search reset
+    if (onResetSearch) onResetSearch();
+  };
+
+  const getSortedVideos = (videoList: Video[]) => {
+    let sorted = [...videoList];
+    if (sortOption === 'views') {
+      sorted.sort((a, b) => parseInt(b.stats.views) - parseInt(a.stats.views));
+    } else if (sortOption === 'likes') {
+      sorted.sort((a, b) => parseInt(b.stats.likes) - parseInt(a.stats.likes));
+    }
+    // 'relevance' is default
+    return sorted;
+  };
+
+  const filterVideos = (videoList: Video[]) => {
+    let filtered = videoList;
+    if (localSearch) {
+      const lowerSearch = localSearch.toLowerCase();
+      filtered = filtered.filter(v => 
+        v.title.toLowerCase().includes(lowerSearch) || 
+        v.creator.name.toLowerCase().includes(lowerSearch) ||
+        v.tags.some(t => t.toLowerCase().includes(lowerSearch))
+      );
+    }
+    return getSortedVideos(filtered);
+  };
+    
+  const handleRefresh = async () => {
+    if (onRefresh) {
+      setIsRefreshing(true);
+      await onRefresh();
+      setIsRefreshing(false);
+      triggerHaptic('success');
+    }
+  };
+  
+  const triggerHaptic = (type: 'light' | 'medium' | 'success' = 'light') => {
+    if ('vibrate' in navigator) {
+      const patterns = { light: [10], medium: [20], success: [10, 50, 10] };
+      navigator.vibrate(patterns[type]);
+    }
   };
 
   if (selectedVideo) {
      return <VideoPlayerController video={selectedVideo} onClose={() => onSelectVideo(null)} onOpenAI={onOpenAI} user={user} />;
   }
 
-  const shorts = videos.filter(v => v.type === 'short');
-  const longForm = videos.filter(v => v.type === 'long');
+  const shorts = filterVideos(videos.filter(v => v.type === 'short'));
+  const longForm = filterVideos(videos.filter(v => v.type === 'long'));
   
-  const searchResults = searchQuery 
-    ? videos.filter(v => 
-        v.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
-        v.tags.some(t => t.toLowerCase().includes(searchQuery.toLowerCase()))
-      )
-    : [];
+  const searchResults = searchMode === 'results' 
+    ? filterVideos(videos)
+    : (searchQuery 
+        ? getSortedVideos(videos.filter(v => 
+            v.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
+            v.tags.some(t => t.toLowerCase().includes(searchQuery.toLowerCase()))
+          ))
+        : []);
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Header Tabs with Upload Link */}
-      <div className="flex items-center justify-between mb-8 px-2 overflow-x-auto no-scrollbar relative min-h-[48px]">
-        <div className="flex items-center gap-6">
-          {searchMode === 'results' ? (
-             <motion.button 
-               initial={{ opacity: 0, x: -20 }}
-               animate={{ opacity: 1, x: 0 }}
-               onClick={onResetSearch}
-               className="flex items-center gap-2 text-lumina-blue font-bold group"
-             >
-                <ArrowLeft size={18} className="group-hover:-translate-x-1 transition-transform" />
-                <span>Back to Engine</span>
-             </motion.button>
-          ) : (
-            <>
-              <button 
-                onClick={() => setViewMode('shorts')}
-                className={`text-2xl font-bold transition-all whitespace-nowrap ${viewMode === 'shorts' ? 'text-white scale-110' : 'text-white/40 hover:text-white/60'}`}
-              >
-                Shorts
-              </button>
-              <button 
-                onClick={() => setViewMode('long')}
-                className={`text-2xl font-bold transition-all whitespace-nowrap ${viewMode === 'long' ? 'text-white scale-110' : 'text-white/40 hover:text-white/60'}`}
-              >
-                Cinema
-              </button>
-              <button 
-                onClick={() => setViewMode('community')}
-                className={`text-2xl font-bold transition-all whitespace-nowrap ${viewMode === 'community' ? 'text-white scale-110' : 'text-white/40 hover:text-white/60'}`}
-              >
-                Community
-              </button>
-            </>
-          )}
+      <div className="flex flex-col gap-4 mb-4 px-2">
+        <div className="flex items-center justify-between min-h-[48px]">
+            <div className="flex items-center gap-6">
+              {searchMode === 'results' ? (
+                 <motion.button 
+                   initial={{ opacity: 0, x: -20 }}
+                   animate={{ opacity: 1, x: 0 }}
+                   onClick={onResetSearch}
+                   className="flex items-center gap-2 text-lumina-blue font-bold group"
+                 >
+                    <ArrowLeft size={18} className="group-hover:-translate-x-1 transition-transform" />
+                    <span>Back to Engine</span>
+                 </motion.button>
+              ) : (
+                <>
+                  <button 
+                    onClick={() => setViewMode('shorts')}
+                    className={`text-2xl font-bold transition-all whitespace-nowrap ${viewMode === 'shorts' ? 'text-white scale-110' : 'text-white/40 hover:text-white/60'}`}
+                  >
+                    Shorts
+                  </button>
+                  <button 
+                    onClick={() => setViewMode('long')}
+                    className={`text-2xl font-bold transition-all whitespace-nowrap ${viewMode === 'long' ? 'text-white scale-110' : 'text-white/40 hover:text-white/60'}`}
+                  >
+                    Cinema
+                  </button>
+                  <button 
+                    onClick={() => setViewMode('community')}
+                    className={`text-2xl font-bold transition-all whitespace-nowrap ${viewMode === 'community' ? 'text-white scale-110' : 'text-white/40 hover:text-white/60'}`}
+                  >
+                    Community
+                  </button>
+                </>
+              )}
+            </div>
+            
+            {/* Refresh & Upload Action Buttons */}
+            <div className="flex items-center gap-3">
+               <button 
+                 onClick={handleRefresh}
+                 disabled={isRefreshing}
+                 className={`p-3 glass rounded-2xl text-white/40 hover:text-lumina-blue hover:bg-white/5 transition-all ${isRefreshing ? 'animate-spin text-lumina-blue' : ''}`}
+                 title="Reload Neural Index"
+               >
+                  <RefreshCcw size={20} />
+               </button>
+               <button 
+                 onClick={onUploadVideo}
+                 className="p-3 glass rounded-2xl text-white/40 hover:text-lumina-blue hover:bg-white/5 transition-all"
+                 title="Upload Neural Content"
+               >
+                  <Plus size={20} />
+               </button>
+            </div>
         </div>
         
-        {/* Upload Simulation */}
-        <div className="flex items-center gap-3">
-           <AnimatePresence>
-             {uploadProgress !== null && (
-               <UploadProgressBar 
-                 progress={uploadProgress} 
-                 onCancel={() => setUploadProgress(null)} 
-               />
-             )}
-           </AnimatePresence>
-           <button 
-             onClick={handleSimulateUpload}
-             className="p-3 glass rounded-2xl text-white/40 hover:text-lumina-blue hover:bg-white/5 transition-all"
-             title="Upload Neural Content"
-           >
-              <Plus size={20} />
+        {/* Search Bar */}
+        <div className="relative glass rounded-2xl flex items-center px-4 py-2 border border-white/5">
+           <Search size={18} className="text-white/30 mr-3" />
+           <input 
+             value={localSearch}
+             onChange={(e) => setLocalSearch(e.target.value)}
+             placeholder="Search by keywords, tags, creators..."
+             className="flex-1 bg-transparent outline-none text-sm text-white placeholder:text-white/30"
+           />
+           {localSearch && (
+               <button onClick={clearSearch} className="p-1 hover:bg-white/10 rounded-full transition-all mr-2">
+                   <X size={16} className="text-white/50" />
+               </button>
+           )}
+           <button className="p-2 bg-lumina-blue rounded-xl text-white hover:bg-lumina-blue/80 transition-all">
+               <Search size={16} />
            </button>
+        </div>
+        
+        {/* Sort Options */}
+        <div className="flex gap-4 text-[10px] font-black text-white/30 uppercase tracking-widest px-2 mt-1">
+           <button onClick={() => setSortOption('relevance')} className={`hover:text-lumina-blue transition-colors ${sortOption === 'relevance' ? 'text-lumina-blue' : ''}`}>Relevance</button>
+           <button onClick={() => setSortOption('views')} className={`hover:text-lumina-blue transition-colors ${sortOption === 'views' ? 'text-lumina-blue' : ''}`}>Views</button>
+           <button onClick={() => setSortOption('likes')} className={`hover:text-lumina-blue transition-colors ${sortOption === 'likes' ? 'text-lumina-blue' : ''}`}>Likes</button>
         </div>
       </div>
 
-      <div className={`flex-1 overflow-y-auto no-scrollbar ${viewMode === 'shorts' && searchMode !== 'results' ? 'snap-y snap-mandatory h-[80vh]' : ''}`}>
+      <div 
+        ref={scrollContainerRef}
+        onScroll={handleScroll}
+        className={`flex-1 overflow-y-auto no-scrollbar ${viewMode === 'shorts' && searchMode !== 'results' ? 'snap-y snap-mandatory h-[80vh]' : ''}`}
+      >
         {searchMode === 'results' && searchQuery ? (
           <div className="flex flex-col gap-6 pb-24">
              <div className="flex items-center justify-between px-2 mb-4">
@@ -242,20 +332,40 @@ export const CinemaSection: React.FC<CinemaSectionProps> = ({
                   <p className="text-xs font-bold uppercase tracking-widest">No neural matches found</p>
                </div>
              )}
+              {isLoadingMore && (
+                <div className="flex justify-center py-10">
+                   <div className="w-8 h-8 border-4 border-lumina-blue/30 border-t-lumina-blue rounded-full animate-spin" />
+                </div>
+              )}
+              {/* Extra Padding for better visualization */}
+              <div className="h-40 invisible" />
           </div>
         ) : viewMode === 'shorts' ? (
-          <div className="flex flex-col items-center pb-40">
+          <div className="flex flex-col items-center pb-[500px]">
             {shorts.map(video => (
               <div key={video.id} className="snap-start snap-always w-full min-h-[80vh] flex justify-center py-4">
                 <ShortsCard video={video} onOpenAI={onOpenAI} onSelect={() => onSelectVideo(video)} />
               </div>
             ))}
+            {isLoadingMore && (
+                <div className="flex justify-center py-20 w-full">
+                   <div className="w-10 h-10 border-4 border-lumina-blue/30 border-t-lumina-blue rounded-full animate-spin" />
+                </div>
+            )}
           </div>
         ) : viewMode === 'long' ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pb-32 px-2">
-            {longForm.map(video => (
-              <LongFormCard key={video.id} video={video} onOpenAI={onOpenAI} onClick={() => onSelectVideo(video)} />
-            ))}
+          <div className="flex flex-col gap-8 pb-[300px] px-2">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              {longForm.map(video => (
+                <LongFormCard key={video.id} video={video} onOpenAI={onOpenAI} onClick={() => onSelectVideo(video)} />
+              ))}
+            </div>
+            {isLoadingMore && (
+                <div className="flex justify-center py-10 w-full">
+                   <div className="w-8 h-8 border-4 border-lumina-blue/30 border-t-lumina-blue rounded-full animate-spin" />
+                </div>
+            )}
+            <div className="h-40 invisible" />
           </div>
         ) : (
           <div className="flex flex-col gap-6 pb-20 max-w-2xl mx-auto w-full">
@@ -333,6 +443,10 @@ const VideoPlayerController = ({ video, onClose, onOpenAI, user }: { video: Vide
   const [isMuted, setIsMuted] = useState(false);
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isLiked, setIsLiked] = useState(false);
+  const [isBookmarked, setIsBookmarked] = useState(false);
+  const [isShareOpen, setIsShareOpen] = useState(false);
+  const [sortMethod, setSortMethod] = useState<'relevance' | 'likes' | 'date'>('relevance');
   const videoRef = useRef<HTMLVideoElement>(null);
   
   const ytId = getYoutubeId(video.url);
@@ -481,28 +595,27 @@ const VideoPlayerController = ({ video, onClose, onOpenAI, user }: { video: Vide
     >
       {/* 16:9 Video Player at Top */}
       <div className="relative aspect-video w-full bg-black shrink-0 border-b border-white/5">
-        {ytId ? (
-          <iframe 
-            src={`https://www.youtube.com/embed/${ytId}?autoplay=1&controls=1&modestbranding=1&rel=0`}
-            className="w-full h-full"
-            allow="autoplay; encrypted-media"
-            allowFullScreen
-          />
-        ) : (
-          <video 
-            ref={videoRef}
-            src={video.url}
-            className="w-full h-full object-contain"
-            autoPlay
-            controls
-            playsInline
-          />
-        )}
+        <LongFormVideoPlayer 
+          url={video.url}
+          ytId={ytId}
+          onOpenAI={() => onOpenAI(video)}
+        />
         <button 
           onClick={onClose}
-          className="absolute top-4 left-4 p-3 bg-black/40 hover:bg-black/60 backdrop-blur-xl rounded-full text-white z-10 border border-white/10 transition-all active:scale-90"
+          className="absolute top-4 left-4 p-3 bg-black/40 hover:bg-black/60 backdrop-blur-xl rounded-full text-white z-20 border border-white/10 transition-all active:scale-90"
         >
           <ArrowLeft size={20} />
+        </button>
+      </div>
+
+      {/* Prominent AI Analysis Trigger */}
+      <div className="px-4 md:px-8 pt-6">
+        <button 
+          onClick={() => onOpenAI(video)}
+          className="w-full h-16 flex items-center justify-between px-8 bg-lumina-gradient text-white rounded-[24px] font-black text-sm uppercase tracking-widest shadow-[0_10px_30px_rgba(30,144,255,0.3)] hover:scale-[1.01] transition-all"
+        >
+           <span className="flex items-center gap-3"><Sparkles size={20} /> Analyze Content with AI</span>
+           <span className="text-[10px] bg-black/20 px-3 py-1 rounded-full">Instant Insights</span>
         </button>
       </div>
 
@@ -535,14 +648,24 @@ const VideoPlayerController = ({ video, onClose, onOpenAI, user }: { video: Vide
                     <span>2 days ago</span>
                  </div>
                  <div className="flex items-center gap-3 overflow-x-auto no-scrollbar">
-                    <button className="flex items-center gap-2 px-6 py-2.5 glass rounded-2xl text-white font-black text-[10px] uppercase hover:bg-white/10 transition-all border border-white/5 shadow-xl">
-                       <ThumbsUp size={16} /> {video.stats.likes}
+                    <button 
+                         onClick={() => setIsLiked(!isLiked)}
+                         className={`flex items-center gap-2 px-6 py-2.5 glass rounded-2xl ${isLiked ? 'text-lumina-pink' : 'text-white'} font-black text-[10px] uppercase hover:bg-white/10 transition-all border border-white/5 shadow-xl`}>
+                       <Heart size={16} className={isLiked ? 'fill-current' : ''} /> {isLiked ? 'Liked' : 'Like'}
                     </button>
-                    <button className="flex items-center gap-2 px-6 py-2.5 glass rounded-2xl text-white font-black text-[10px] uppercase hover:bg-white/10 transition-all border border-white/5 shadow-xl">
+                    <button 
+                        className="flex items-center gap-2 px-6 py-2.5 glass rounded-2xl text-white font-black text-[10px] uppercase hover:bg-white/10 transition-all border border-white/5 shadow-xl">
+                       <MessageCircle size={16} /> Comment
+                    </button>
+                    <button 
+                        onClick={() => setIsShareOpen(true)}
+                        className="flex items-center gap-2 px-6 py-2.5 glass rounded-2xl text-white font-black text-[10px] uppercase hover:bg-white/10 transition-all border border-white/5 shadow-xl">
                        <Share2 size={16} /> Share
                     </button>
-                    <button className="flex items-center gap-2 px-6 py-2.5 glass rounded-2xl text-white font-black text-[10px] uppercase hover:bg-white/10 transition-all border border-white/5 shadow-xl">
-                       <Bookmark size={16} /> Save
+                    <button 
+                        onClick={() => setIsBookmarked(!isBookmarked)}
+                        className={`flex items-center gap-2 px-6 py-2.5 glass rounded-2xl ${isBookmarked ? 'text-lumina-blue' : 'text-white'} font-black text-[10px] uppercase hover:bg-white/10 transition-all border border-white/5 shadow-xl`}>
+                      <Bookmark size={16} className={isBookmarked ? 'fill-current' : ''} /> {isBookmarked ? 'Saved' : 'Save'}
                     </button>
                     <button className="flex items-center justify-center w-[46px] h-[46px] glass rounded-2xl text-white hover:bg-white/10 transition-all border border-white/5 shadow-xl">
                        <MoreVertical size={18} />
@@ -550,6 +673,13 @@ const VideoPlayerController = ({ video, onClose, onOpenAI, user }: { video: Vide
                  </div>
               </div>
            </motion.div>
+           
+           <ShareModal 
+             isOpen={isShareOpen}
+             onClose={() => setIsShareOpen(false)}
+             url={window.location.href}
+             title={video.title}
+           />
 
            {/* Channel Interactions */}
            <motion.div 
@@ -729,12 +859,20 @@ const VideoPlayerController = ({ video, onClose, onOpenAI, user }: { video: Vide
 const ShortsCard = ({ video, onOpenAI, onSelect }: { video: Video, onOpenAI: (v: Video) => void, onSelect: () => void }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(true);
+  const [muteFeedback, setMuteFeedback] = useState<'muted' | 'unmuted' | null>(null);
   const [showControls, setShowControls] = useState(true);
   const [progress, setProgress] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const controlsTimeout = useRef<NodeJS.Timeout | null>(null);
   const ytId = getYoutubeId(video.url);
+
+  useEffect(() => {
+    if (muteFeedback) {
+      const timer = setTimeout(() => setMuteFeedback(null), 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [muteFeedback]);
 
   const handleTimeUpdate = () => {
     if (videoRef.current) {
@@ -759,7 +897,10 @@ const ShortsCard = ({ video, onOpenAI, onSelect }: { video: Video, onOpenAI: (v:
   useEffect(() => {
     const observer = new IntersectionObserver(
       ([entry]) => {
-        if (entry.isIntersecting) {
+        if (entry.intersectionRatio > 0.1 && videoRef.current) {
+          videoRef.current.preload = 'auto';
+        }
+        if (entry.intersectionRatio > 0.5) {
           videoRef.current?.play().catch(() => {});
           setIsPlaying(true);
         } else {
@@ -767,7 +908,7 @@ const ShortsCard = ({ video, onOpenAI, onSelect }: { video: Video, onOpenAI: (v:
           setIsPlaying(false);
         }
       },
-      { threshold: 0.6 }
+      { threshold: [0.1, 0.5] }
     );
 
     if (containerRef.current) {
@@ -801,20 +942,17 @@ const ShortsCard = ({ video, onOpenAI, onSelect }: { video: Video, onOpenAI: (v:
     e.stopPropagation();
     resetControlsTimer();
     setIsMuted(!isMuted);
+    setMuteFeedback(isMuted ? 'unmuted' : 'muted');
   };
 
   return (
     <div 
       ref={containerRef} 
       onClick={(e) => {
-        if (showControls) {
-          onSelect();
-        } else {
-          resetControlsTimer();
-        }
+        togglePlay(e);
       }}
       onMouseMove={resetControlsTimer}
-      className="relative w-full max-w-[400px] h-[80vh] min-h-[600px] max-h-[850px] bg-black rounded-[40px] overflow-hidden shadow-2xl border border-white/10 group cursor-pointer"
+      className="relative w-full max-w-[500px] h-[90vh] min-h-[700px] max-h-[900px] bg-black rounded-[40px] overflow-hidden shadow-2xl border border-white/10 group cursor-pointer"
     >
       {ytId ? (
         <img 
@@ -831,8 +969,25 @@ const ShortsCard = ({ video, onOpenAI, onSelect }: { video: Video, onOpenAI: (v:
           loop
           muted={isMuted}
           playsInline
+          preload="none"
         />
       )}
+
+      {/* Mute Visual Feedback */}
+      <AnimatePresence>
+        {muteFeedback && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.8 }}
+            className="absolute inset-0 z-30 flex items-center justify-center pointer-events-none"
+          >
+             <div className="bg-black/50 backdrop-blur-xl p-6 rounded-full text-white border border-white/20">
+                {muteFeedback === 'muted' ? <VolumeX size={48} /> : <Volume2 size={48} />}
+             </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Play/Pause Central Overlay */}
       <AnimatePresence>
@@ -914,11 +1069,15 @@ const ShortsCard = ({ video, onOpenAI, onSelect }: { video: Video, onOpenAI: (v:
             <span className="font-bold text-white uppercase text-[10px] tracking-widest">{video.creator.name}</span>
          </div>
          <h3 className="text-white text-lg font-black mb-2 line-clamp-1">{video.title}</h3>
-      </div>
-      <div className="absolute bottom-8 right-6">
-         <div className="w-12 h-12 rounded-full bg-white/10 backdrop-blur-3xl border border-white/20 flex items-center justify-center text-white">
-            <Sparkles size={20} className="text-lumina-blue" />
-         </div>
+         <button 
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenAI(video);
+            }}
+            className="pointer-events-auto w-full flex items-center justify-center gap-2 mt-2 px-4 py-2 bg-lumina-blue/20 backdrop-blur-md rounded-xl text-white font-bold text-xs uppercase tracking-widest hover:bg-lumina-blue/40 transition-all border border-white/10"
+         >
+            <Sparkles size={14} /> Analyze Content
+         </button>
       </div>
     </div>
   );
@@ -979,6 +1138,12 @@ const LongFormCard = ({ video, onOpenAI, onClick }: { video: Video, onOpenAI: (v
         <p className="text-white/40 text-sm line-clamp-2 leading-relaxed font-medium">
           {video.description}
         </p>
+        <button 
+          onClick={() => onOpenAI(video)}
+          className="w-full flex items-center justify-center gap-3 p-4 bg-lumina-blue/10 border border-lumina-blue/20 rounded-2xl text-lumina-blue font-black text-xs uppercase tracking-widest hover:bg-lumina-blue hover:text-white transition-all active:scale-95"
+        >
+          <Sparkles size={16} /> Analyze Content with AI
+        </button>
         <div className="flex flex-wrap gap-2 pt-2">
            {video.tags.map(t => (
              <span key={t} className="text-[10px] text-white/30 font-bold uppercase tracking-widest px-4 py-1.5 bg-white/5 rounded-full border border-white/5 hover:bg-white/10 transition-colors">

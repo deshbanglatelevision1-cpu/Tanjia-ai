@@ -72,13 +72,36 @@ export const processImageWithGeminiStream = async (prompt: string, base64Image: 
     const ai = getGemini();
     
     const result = await ai.models.generateContentStream({
-        model: "gemini-3-flash-preview",
+        model: "gemini-1.5-flash",
         contents: [
             {
                 role: 'user',
                 parts: [
                     { text: prompt },
                     { inlineData: { data: base64Image, mimeType } }
+                ]
+            }
+        ],
+        config: {
+            systemInstruction: SYSTEM_INSTRUCTION
+        }
+    });
+
+    return result;
+};
+
+export const processVideoWithGeminiStream = async (prompt: string, base64Video: string, mimeType: string) => {
+    const ai = getGemini();
+    
+    // Using gemini-1.5-flash for video processing as it's faster and supports video well
+    const result = await ai.models.generateContentStream({
+        model: "gemini-1.5-flash",
+        contents: [
+            {
+                role: 'user',
+                parts: [
+                    { text: prompt },
+                    { inlineData: { data: base64Video, mimeType } }
                 ]
             }
         ],

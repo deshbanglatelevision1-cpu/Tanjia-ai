@@ -12,7 +12,7 @@ import {
   Plus, Home, Bell, History, Settings, MoreHorizontal, HelpCircle, MessageSquare,
   CloudRain, Zap, Music, PenTool, Layout, ThumbsUp, ThumbsDown,
   Volume2, VolumeX, Copy, Share2, Filter, SlidersHorizontal, Calendar, Download,
-  FileText, FileCode, Pencil, Clapperboard, Film, PlayCircle, Send, Heart, MessageCircle, Bookmark,
+  FileText, FileCode, Pencil, Clapperboard, Film, PlayCircle, Play, Send, Heart, MessageCircle, Bookmark,
   Activity, Mail, Users, CheckCircle
 } from 'lucide-react';
 import { chatWithGeminiStream, processImageWithGeminiStream, generateImageWithGemini } from './services/geminiService';
@@ -355,24 +355,39 @@ const NeuralProcessingIndicator = () => {
 };
 
 import { fetchCinemaVideos } from './services/youtubeService';
+import { processVideoWithGeminiStream } from './services/geminiService';
 
 export default function App() {
   const [selectedVideo, setSelectedVideo] = useState<Video | null>(null);
   const [videos, setVideos] = useState<Video[]>([]);
   const [isLoadingVideos, setIsLoadingVideos] = useState(true);
+  const [nextPageToken, setNextPageToken] = useState<string | undefined>();
+  const [selectedVideoFile, setSelectedVideoFile] = useState<{ data: string, type: string, name: string } | null>(null);
+
+  const loadVideos = async (pageToken?: string) => {
+    if (!pageToken) setIsLoadingVideos(true);
+    const result = await fetchCinemaVideos('cinema cinematography movie trailers AI futuretech', pageToken);
+    
+    if (result.videos.length > 0) {
+      if (pageToken) {
+        setVideos(prev => {
+          const existingIds = new Set(prev.map(v => v.id));
+          const newVideos = result.videos.filter(v => !existingIds.has(v.id));
+          return [...prev, ...newVideos];
+        });
+      } else {
+        const uniqueVideos = Array.from(new Map(result.videos.map(v => [v.id, v])).values());
+        setVideos(uniqueVideos);
+      }
+      setNextPageToken(result.nextPageToken);
+    } else if (!pageToken) {
+      // Fallback to internal mock if API fails only on initial load
+      setVideos(MOCK_VIDEOS);
+    }
+    setIsLoadingVideos(false);
+  };
 
   useEffect(() => {
-    const loadVideos = async () => {
-      setIsLoadingVideos(true);
-      const ytVideos = await fetchCinemaVideos('cinema cinematography movie trailers');
-      if (ytVideos.length > 0) {
-        setVideos(ytVideos);
-      } else {
-        // Fallback to internal mock if API fails
-        setVideos(MOCK_VIDEOS);
-      }
-      setIsLoadingVideos(false);
-    };
     loadVideos();
   }, []);
   const [mode, setMode] = useState<Mode>('search');
@@ -415,6 +430,7 @@ export default function App() {
   const [isTyping, setIsTyping] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const [selectedImage, setSelectedImage] = useState<{data: string, type: string} | null>(null);
+  const [isProcessingVideo, setIsProcessingVideo] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -759,7 +775,34 @@ export default function App() {
     return 'Isha';
   };
 
+  const videoFileInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+
+  const handleVideoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 20 * 1024 * 1024) { // 20MB limit for base64 demo
+      alert("Video file is too large for AI sync. Please use files under 20MB.");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const base64Content = event.target?.result as string;
+      const base64Data = base64Content.split(',')[1];
+      setSelectedVideoFile({
+        data: base64Data,
+        type: file.type,
+        name: file.name
+      });
+      setMode('ai');
+      setQuery(`I've uploaded a video titled "${file.name}". Can you analyze this neural content?`);
+      triggerHaptic('success');
+    };
+    reader.readAsDataURL(file);
+  };
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -798,10 +841,15 @@ export default function App() {
             searchQuery={lastExecutedQuery}
             selectedVideo={selectedVideo}
             onSelectVideo={setSelectedVideo}
+            onLoadMore={() => nextPageToken && loadVideos(nextPageToken)}
+            isLoadingMore={isLoadingVideos && videos.length > 0}
+            onUploadVideo={() => videoFileInputRef.current?.click()}
+            onRefresh={() => loadVideos()}
             onResetSearch={() => {
               setSearchMode('ai');
               setLastExecutedQuery('');
               setMode('ai');
+              setActiveTab('home');
             }}
             onOpenAI={(v) => {
               setActiveVideoId(v.id);
@@ -1037,7 +1085,7 @@ export default function App() {
 
   const handleSend = async (overrideHistory?: Message[], overrideQuery?: string) => {
     const activeQuery = overrideQuery !== undefined ? overrideQuery : query;
-    if (!activeQuery.trim() && !selectedImage) return;
+    if (!activeQuery.trim() && !selectedImage && !selectedVideoFile) return;
     
     setLastExecutedQuery(activeQuery);
     triggerHaptic('medium');
@@ -1091,14 +1139,23 @@ export default function App() {
         if (isAutoSpeak) speakText(fullOverview, aiId);
 
         // 2. Fetch Web Results
-        const results = await fetchSearchResults(searchQuery);
+        const [results, ytVideos] = await Promise.all([
+          fetchSearchResults(searchQuery),
+          fetchCinemaVideos(searchQuery)
+        ]);
+        
         setSearchResults(results);
+        if (ytVideos && ytVideos.videos.length > 0) {
+          setVideos(ytVideos.videos);
+          setNextPageToken(ytVideos.nextPageToken);
+        }
         triggerHaptic('success');
       } catch (error) {
         console.error("Search failed:", error);
       } finally {
         setIsSearching(false);
         setSelectedImage(null);
+        setSelectedVideoFile(null);
       }
       return;
     }
@@ -1116,7 +1173,10 @@ export default function App() {
     setMessages([...baseMessages, userMessage]);
     
     if (overrideQuery === undefined) setQuery('');
+    const currentSelectedImage = selectedImage;
+    const currentSelectedVideo = selectedVideoFile;
     setSelectedImage(null);
+    setSelectedVideoFile(null);
     setIsTyping(true);
 
     let effectiveQuery = activeQuery;
@@ -1196,12 +1256,16 @@ export default function App() {
         ? "You are TANJIA AI in Deep Thinking mode. Your signature style is step-by-step reasoning, looking for hidden patterns, and providing high-precision analysis. Always greet with 'Assalamu Alaikum' (আসসালামু আলাইকুম) and never use 'Namaskar' (নমস্কার)."
         : "You are TANJIA AI, a helpful and efficient assistant. Always greet with 'Assalamu Alaikum' (আসসালামু আলাইকুম) and never use 'Namaskar' (নমস্কার).";
 
-      if (userMessage.image) {
-        const base64Data = userMessage.image.includes('base64,') 
-          ? userMessage.image.split('base64,')[1] 
-          : userMessage.image;
-        const mimeType = userMessage.image.split(';')[0].split(':')[1] || 'image/png';
+      if (currentSelectedImage) {
+        const base64Data = currentSelectedImage.data.includes('base64,') 
+          ? currentSelectedImage.data.split('base64,')[1] 
+          : currentSelectedImage.data;
+        const mimeType = currentSelectedImage.type;
         stream = await processImageWithGeminiStream(`${systemContext} ${userMessage.content || "Analyze this file"}`, base64Data, mimeType);
+      } else if (currentSelectedVideo) {
+        setIsProcessingVideo(true);
+        stream = await processVideoWithGeminiStream(`${systemContext} ${userMessage.content || "Analyze this video"}`, currentSelectedVideo.data, currentSelectedVideo.type);
+        setIsProcessingVideo(false);
       } else {
         const history = baseMessages.map(m => ({
           role: m.role,
@@ -2944,6 +3008,40 @@ export default function App() {
         )}
       </AnimatePresence>
       
+      {/* Hidden File Input for Video Neural Upload */}
+      <input 
+        type="file" 
+        ref={videoFileInputRef} 
+        onChange={handleVideoUpload} 
+        accept="video/*" 
+        className="hidden" 
+      />
+
+      {/* Video Processing Neural Overlay */}
+      <AnimatePresence>
+        {isProcessingVideo && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[150] bg-black/80 backdrop-blur-3xl flex flex-col items-center justify-center pointer-events-none"
+          >
+            <div className="relative">
+              <motion.div 
+                animate={{ rotate: 360 }}
+                transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
+                className="w-24 h-24 rounded-full border-4 border-lumina-blue/20 border-t-lumina-blue shadow-[0_0_50px_rgba(30,144,255,0.4)]"
+              />
+              <div className="absolute inset-0 flex items-center justify-center">
+                <Play size={24} className="text-lumina-blue animate-pulse" />
+              </div>
+            </div>
+            <h3 className="mt-8 text-xl font-black uppercase tracking-[0.5em] text-white">Neural Processing</h3>
+            <p className="mt-2 text-xs font-bold text-white/30 uppercase tracking-widest">Converting motion vectors to intelligence...</p>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Image Zoom Modal */}
       <AnimatePresence>
         {zoomedImage && (
