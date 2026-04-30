@@ -34,8 +34,13 @@ export const chatWithGeminiStream = async (prompt: string, history: any[] = []) 
     return result;
 };
 
-export const generateImageWithGemini = async (prompt: string, aspectRatio: string = "1:1") => {
+export const generateImageWithGemini = async (prompt: string, aspectRatio: string = "1:1", artStyle: string = "none") => {
     const ai = getGemini();
+    
+    let enhancedPrompt = prompt;
+    if (artStyle && artStyle !== 'none') {
+        enhancedPrompt += `, in ${artStyle} style`;
+    }
     
     const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash-image',
@@ -43,7 +48,7 @@ export const generateImageWithGemini = async (prompt: string, aspectRatio: strin
             {
                 role: 'user',
                 parts: [
-                    { text: `Create a high-quality, professional image of: ${prompt}. Style: Elegant, sophisticated, match the Pink-Blue-Violet Glassmorphism aesthetic where appropriate.` }
+                    { text: `Create a high-quality, professional image of: ${enhancedPrompt}. Style: Elegant, sophisticated, match the Pink-Blue-Violet Glassmorphism aesthetic where appropriate.` }
                 ]
             }
         ],

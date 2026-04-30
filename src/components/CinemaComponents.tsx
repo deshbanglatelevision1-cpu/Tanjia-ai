@@ -5,6 +5,9 @@ import {
   Sparkles, Send, X, MoreVertical, ThumbsUp, ThumbsDown, CheckCircle, 
   ArrowLeft, Search, Filter, Plus, UserPlus, PlayCircle, Mail, Users
 } from 'lucide-react';
+import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { User as FirebaseUser } from 'firebase/auth';
 
 interface Video {
   id: string;
@@ -19,6 +22,8 @@ interface Video {
   title: string;
   description: string;
   type: 'short' | 'long';
+  qualityLabel?: string;
+  durationLabel?: string;
   stats: {
     views: string;
     likes: string;
@@ -36,9 +41,84 @@ interface CinemaSectionProps {
   searchQuery: string;
   onResetSearch: () => void;
   onOpenAI: (video: Video) => void;
+  selectedVideo: Video | null;
+  onSelectVideo: (video: Video | null) => void;
 }
 
-export const CinemaSection: React.FC<CinemaSectionProps> = ({ viewMode, setViewMode, videos, user, searchMode, searchQuery, onResetSearch, onOpenAI }) => {
+// Dedicated Upload Progress Bar Component
+const UploadProgressBar = ({ progress, onCancel }: { progress: number, onCancel: () => void }) => {
+  return (
+    <motion.div 
+      initial={{ opacity: 0, x: 20, scale: 0.9 }}
+      animate={{ opacity: 1, x: 0, scale: 1 }}
+      exit={{ opacity: 0, x: 20, scale: 0.9 }}
+      className="flex items-center gap-4 glass px-5 py-3 rounded-2xl border-white/10 shadow-2xl relative overflow-hidden"
+    >
+      {/* Background Animated Glow */}
+      <div className="absolute inset-0 bg-lumina-blue/5 animate-pulse" />
+      
+      <div className="flex flex-col gap-1.5 relative z-10">
+        <div className="flex items-center justify-between gap-10">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-lumina-blue animate-ping" />
+             <span className="text-[10px] font-black uppercase tracking-[0.2em] text-lumina-blue">
+              {progress < 100 ? 'Neural Syncing...' : 'Upload Complete'}
+            </span>
+          </div>
+          <span className="text-[10px] font-black text-white/60 tracking-wider">{progress}%</span>
+        </div>
+        
+        <div className="w-40 h-2 bg-white/5 rounded-full overflow-hidden border border-white/5 shadow-inner">
+           <motion.div 
+             className="h-full bg-lumina-gradient relative shadow-[0_0_10px_rgba(30,144,255,0.4)]" 
+             initial={{ width: 0 }} 
+             animate={{ width: `${progress}%` }} 
+             transition={{ type: 'spring', damping: 20, stiffness: 60 }}
+           >
+             {/* Scanning effect */}
+             <motion.div 
+                animate={{ x: ['-100%', '200%'] }}
+                transition={{ duration: 1.5, repeat: Infinity, ease: "linear" }}
+                className="absolute inset-y-0 w-1/2 bg-gradient-to-r from-transparent via-white/30 to-transparent"
+             />
+           </motion.div>
+        </div>
+      </div>
+
+      <button 
+        onClick={onCancel}
+        className="p-2 transition-all text-white/20 hover:text-white/40 hover:bg-white/5 rounded-xl group relative z-10"
+      >
+        <X size={16} className="group-hover:rotate-90 transition-transform duration-300" />
+      </button>
+    </motion.div>
+  );
+};
+
+export const CinemaSection: React.FC<CinemaSectionProps> = ({ 
+  viewMode, setViewMode, videos, user, searchMode, searchQuery, onResetSearch, onOpenAI,
+  selectedVideo, onSelectVideo
+}) => {
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  
+  const handleSimulateUpload = () => {
+    setUploadProgress(0);
+    const interval = setInterval(() => {
+      setUploadProgress(prev => {
+        if (prev === null || prev >= 100) {
+          clearInterval(interval);
+          setTimeout(() => setUploadProgress(null), 1000);
+          return 100;
+        }
+        return prev + 5;
+      });
+    }, 150);
+  };
+
+  if (selectedVideo) {
+     return <VideoPlayerController video={selectedVideo} onClose={() => onSelectVideo(null)} onOpenAI={onOpenAI} user={user} />;
+  }
+
   const shorts = videos.filter(v => v.type === 'short');
   const longForm = videos.filter(v => v.type === 'long');
   
@@ -51,40 +131,61 @@ export const CinemaSection: React.FC<CinemaSectionProps> = ({ viewMode, setViewM
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      {/* Header Tabs */}
-      <div className="flex items-center gap-6 mb-8 px-2 overflow-x-auto no-scrollbar relative min-h-[48px]">
-        {searchMode === 'results' ? (
-           <motion.button 
-             initial={{ opacity: 0, x: -20 }}
-             animate={{ opacity: 1, x: 0 }}
-             onClick={onResetSearch}
-             className="flex items-center gap-2 text-lumina-blue font-bold group"
+      {/* Header Tabs with Upload Link */}
+      <div className="flex items-center justify-between mb-8 px-2 overflow-x-auto no-scrollbar relative min-h-[48px]">
+        <div className="flex items-center gap-6">
+          {searchMode === 'results' ? (
+             <motion.button 
+               initial={{ opacity: 0, x: -20 }}
+               animate={{ opacity: 1, x: 0 }}
+               onClick={onResetSearch}
+               className="flex items-center gap-2 text-lumina-blue font-bold group"
+             >
+                <ArrowLeft size={18} className="group-hover:-translate-x-1 transition-transform" />
+                <span>Back to Engine</span>
+             </motion.button>
+          ) : (
+            <>
+              <button 
+                onClick={() => setViewMode('shorts')}
+                className={`text-2xl font-bold transition-all whitespace-nowrap ${viewMode === 'shorts' ? 'text-white scale-110' : 'text-white/40 hover:text-white/60'}`}
+              >
+                Shorts
+              </button>
+              <button 
+                onClick={() => setViewMode('long')}
+                className={`text-2xl font-bold transition-all whitespace-nowrap ${viewMode === 'long' ? 'text-white scale-110' : 'text-white/40 hover:text-white/60'}`}
+              >
+                Cinema
+              </button>
+              <button 
+                onClick={() => setViewMode('community')}
+                className={`text-2xl font-bold transition-all whitespace-nowrap ${viewMode === 'community' ? 'text-white scale-110' : 'text-white/40 hover:text-white/60'}`}
+              >
+                Community
+              </button>
+            </>
+          )}
+        </div>
+        
+        {/* Upload Simulation */}
+        <div className="flex items-center gap-3">
+           <AnimatePresence>
+             {uploadProgress !== null && (
+               <UploadProgressBar 
+                 progress={uploadProgress} 
+                 onCancel={() => setUploadProgress(null)} 
+               />
+             )}
+           </AnimatePresence>
+           <button 
+             onClick={handleSimulateUpload}
+             className="p-3 glass rounded-2xl text-white/40 hover:text-lumina-blue hover:bg-white/5 transition-all"
+             title="Upload Neural Content"
            >
-              <ArrowLeft size={18} className="group-hover:-translate-x-1 transition-transform" />
-              <span>Back to Engine</span>
-           </motion.button>
-        ) : (
-          <>
-            <button 
-              onClick={() => setViewMode('shorts')}
-              className={`text-2xl font-bold transition-all whitespace-nowrap ${viewMode === 'shorts' ? 'text-white scale-110' : 'text-white/40 hover:text-white/60'}`}
-            >
-              Shorts
-            </button>
-            <button 
-              onClick={() => setViewMode('long')}
-              className={`text-2xl font-bold transition-all whitespace-nowrap ${viewMode === 'long' ? 'text-white scale-110' : 'text-white/40 hover:text-white/60'}`}
-            >
-              Cinema
-            </button>
-            <button 
-              onClick={() => setViewMode('community')}
-              className={`text-2xl font-bold transition-all whitespace-nowrap ${viewMode === 'community' ? 'text-white scale-110' : 'text-white/40 hover:text-white/60'}`}
-            >
-              Community
-            </button>
-          </>
-        )}
+              <Plus size={20} />
+           </button>
+        </div>
       </div>
 
       <div className={`flex-1 overflow-y-auto no-scrollbar ${viewMode === 'shorts' && searchMode !== 'results' ? 'snap-y snap-mandatory h-[80vh]' : ''}`}>
@@ -102,22 +203,26 @@ export const CinemaSection: React.FC<CinemaSectionProps> = ({ viewMode, setViewM
                 {searchResults.map(video => (
                   <motion.div 
                     key={video.id}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="glass p-4 rounded-[32px] border-white/5 hover:border-lumina-blue/30 transition-all group relative overflow-hidden"
+                    layoutId={`video-${video.id}`}
+                    onClick={() => onSelectVideo(video)}
+                    className="glass p-4 rounded-[32px] border-white/5 hover:border-lumina-blue/30 transition-all group relative overflow-hidden cursor-pointer"
                   >
                     <div className="relative aspect-video rounded-2xl overflow-hidden mb-4">
                        <img src={video.thumbnail} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" alt="" />
                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                          <button 
-                            onClick={() => onOpenAI(video)}
-                            className="w-12 h-12 rounded-full bg-white text-black flex items-center justify-center shadow-2xl"
-                          >
+                          <div className="w-12 h-12 rounded-full bg-white text-black flex items-center justify-center shadow-2xl">
                             <Play fill="currentColor" size={20} className="ml-1" />
-                          </button>
+                          </div>
                        </div>
-                       <div className="absolute bottom-2 right-2 px-2 py-1 glass rounded-lg text-[10px] font-black text-white">
-                          {video.type === 'short' ? '0:60' : '4:20'}
+                       <div className="absolute bottom-2 right-2 flex gap-1 items-center">
+                          {video.qualityLabel && (
+                            <div className="px-2 py-1 bg-lumina-blue/80 backdrop-blur-md rounded-lg text-[8px] font-black text-white border border-white/20">
+                               {video.qualityLabel}
+                            </div>
+                          )}
+                          <div className="px-2 py-1 glass rounded-lg text-[10px] font-black text-white">
+                             {video.durationLabel || (video.type === 'short' ? '0:60' : '4:20')}
+                          </div>
                        </div>
                     </div>
                     <h4 className="font-bold text-white mb-2 line-clamp-1 group-hover:text-lumina-blue transition-colors">{video.title}</h4>
@@ -142,18 +247,19 @@ export const CinemaSection: React.FC<CinemaSectionProps> = ({ viewMode, setViewM
           <div className="flex flex-col items-center pb-40">
             {shorts.map(video => (
               <div key={video.id} className="snap-start snap-always w-full min-h-[80vh] flex justify-center py-4">
-                <ShortsCard video={video} onOpenAI={onOpenAI} />
+                <ShortsCard video={video} onOpenAI={onOpenAI} onSelect={() => onSelectVideo(video)} />
               </div>
             ))}
           </div>
         ) : viewMode === 'long' ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pb-20">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pb-32 px-2">
             {longForm.map(video => (
-              <LongFormCard key={video.id} video={video} onOpenAI={onOpenAI} />
+              <LongFormCard key={video.id} video={video} onOpenAI={onOpenAI} onClick={() => onSelectVideo(video)} />
             ))}
           </div>
         ) : (
           <div className="flex flex-col gap-6 pb-20 max-w-2xl mx-auto w-full">
+            {/* Community logic stays similar but themed */}
              <div className="glass p-6 rounded-[32px] border-white/10 mb-8">
                 <div className="flex gap-4 mb-4">
                    <div className="w-12 h-12 rounded-full overflow-hidden border border-white/10">
@@ -214,11 +320,441 @@ export const CinemaSection: React.FC<CinemaSectionProps> = ({ viewMode, setViewM
   );
 };
 
-const ShortsCard = ({ video, onOpenAI }: { video: Video, onOpenAI: (v: Video) => void }) => {
+const getYoutubeId = (url: string) => {
+  const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
+  const match = url.match(regExp);
+  return (match && match[2].length === 11) ? match[2] : null;
+};
+
+// Dynamic VideoPlayerController: Switches between 16:9 and 9:16 layout
+const VideoPlayerController = ({ video, onClose, onOpenAI, user }: { video: Video, onClose: () => void, onOpenAI: (v: Video) => void, user: FirebaseUser | null }) => {
+  const isShort = video.type === 'short';
+  const [isPlaying, setIsPlaying] = useState(true);
+  const [isMuted, setIsMuted] = useState(false);
+  const [isSubscribed, setIsSubscribed] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  
+  const ytId = getYoutubeId(video.url);
+
+  useEffect(() => {
+    // Check if user is already subscribed (mock logic for now or fetch from Firestore)
+    const checkSub = async () => {
+      if (!user) return;
+      const userRef = doc(db, 'users', user.uid);
+      try {
+        const snap = await getDoc(userRef);
+        if (snap.exists()) {
+          const subs = snap.data().subscribedTo || [];
+          setIsSubscribed(subs.includes(video.creator.id));
+        }
+      } catch (e) {
+        console.error("Subscription check failed", e);
+      }
+    };
+    checkSub();
+  }, [user, video.creator.id]);
+
+  const toggleSubscription = async () => {
+    if (!user) {
+      alert("Please sign in to subscribe to neural creators.");
+      return;
+    }
+    
+    setIsSyncing(true);
+    const userRef = doc(db, 'users', user.uid);
+    try {
+      const snap = await getDoc(userRef);
+      const currentSubs = snap.exists() ? (snap.data().subscribedTo || []) : [];
+      let newSubs;
+      
+      if (isSubscribed) {
+        newSubs = currentSubs.filter((id: string) => id !== video.creator.id);
+      } else {
+        newSubs = [...currentSubs, video.creator.id];
+      }
+      
+      await setDoc(userRef, {
+        subscribedTo: newSubs,
+        lastSync: serverTimestamp()
+      }, { merge: true });
+      
+      setIsSubscribed(!isSubscribed);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}`);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  if (isShort) {
+    return (
+      <motion.div 
+        initial={{ opacity: 0 }} 
+        animate={{ opacity: 1 }} 
+        exit={{ opacity: 0 }}
+        className="fixed inset-0 z-[100] bg-black flex flex-col items-center"
+      >
+        <div className="relative w-full max-w-[500px] h-full">
+           {ytId ? (
+             <iframe 
+               src={`https://www.youtube.com/embed/${ytId}?autoplay=1&mute=${isMuted ? 1 : 0}&controls=0&loop=1&playlist=${ytId}`}
+               className="w-full h-full object-cover"
+               allow="autoplay; encrypted-media"
+               allowFullScreen
+             />
+           ) : (
+             <video 
+                ref={videoRef}
+                src={video.url}
+                className="w-full h-full object-cover"
+                autoPlay
+                loop
+                playsInline
+                onClick={() => setIsPlaying(!isPlaying)}
+             />
+           )}
+           
+           {/* Top Controls */}
+           <div className="absolute top-8 left-6 right-6 flex justify-between items-center z-10">
+              <button onClick={onClose} className="p-3 glass rounded-2xl text-white">
+                <ArrowLeft size={24} />
+              </button>
+              <div className="flex gap-3">
+                 <button onClick={() => setIsMuted(!isMuted)} className="p-3 glass rounded-2xl text-white">
+                    {isMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}
+                 </button>
+              </div>
+           </div>
+
+           {/* Bottom Right Actions - Transparent Overlays */}
+           <div className="absolute right-4 bottom-32 flex flex-col gap-6 items-center z-20">
+              <div className="flex flex-col items-center gap-1 group">
+                 <button className="p-4 bg-white/10 backdrop-blur-xl rounded-full text-white border border-white/10 shadow-xl group-active:scale-95 transition-all">
+                    <Heart size={28} className="text-lumina-pink fill-current shadow-[0_0_15px_rgba(255,105,180,0.5)]" />
+                 </button>
+                 <span className="text-[10px] font-black text-white shadow-lg">{video.stats.likes}</span>
+              </div>
+              <div className="flex flex-col items-center gap-1 group">
+                 <button className="p-4 bg-white/10 backdrop-blur-xl rounded-full text-white border border-white/10 shadow-xl group-active:scale-95 transition-all">
+                    <MessageCircle size={28} />
+                 </button>
+                 <span className="text-[10px] font-black text-white shadow-lg">{video.stats.comments}</span>
+              </div>
+              <button className="p-4 bg-white/10 backdrop-blur-xl rounded-full text-white border border-white/10 shadow-xl group-active:scale-95 transition-all">
+                 <Share2 size={28} />
+              </button>
+              <button 
+                onClick={() => onOpenAI(video)}
+                className="p-4 bg-lumina-gradient rounded-full text-white shadow-[0_0_20px_rgba(30,144,255,0.4)] animate-pulse"
+              >
+                 <Sparkles size={28} />
+              </button>
+           </div>
+
+           {/* Brand & Detail Overlay (Bottom) */}
+           <div className="absolute left-6 right-20 bottom-12 z-20 text-white">
+              <div className="flex items-center gap-3 mb-4">
+                 <img src={video.creator.avatar} className="w-12 h-12 rounded-full border-2 border-lumina-blue/50" alt="" />
+                 <div>
+                    <h4 className="font-black text-lg">@{video.creator.name}</h4>
+                    <button className="text-[10px] font-black text-lumina-blue uppercase tracking-widest bg-lumina-blue/10 px-2 rounded">Subscribe</button>
+                 </div>
+              </div>
+              <h3 className="text-xl font-bold mb-2 leading-tight">{video.title}</h3>
+              <p className="text-xs text-white/60 line-clamp-2 mb-3">{video.description}</p>
+              <div className="flex flex-wrap gap-2 text-[10px] uppercase font-black text-lumina-pink">
+                 {video.tags.map(t => <span key={t}>#{t}</span>)}
+              </div>
+           </div>
+        </div>
+      </motion.div>
+    );
+  }
+
+  // Long Form Professional Layout (YouTube-style nested View)
+  return (
+    <motion.div 
+      initial={{ opacity: 0, y: 100 }} 
+      animate={{ opacity: 1, y: 0 }} 
+      className="flex flex-col h-full rounded-t-[40px] overflow-hidden bg-[#050505] shadow-[0_-50px_100px_rgba(0,0,0,0.5)]"
+    >
+      {/* 16:9 Video Player at Top */}
+      <div className="relative aspect-video w-full bg-black shrink-0 border-b border-white/5">
+        {ytId ? (
+          <iframe 
+            src={`https://www.youtube.com/embed/${ytId}?autoplay=1&controls=1&modestbranding=1&rel=0`}
+            className="w-full h-full"
+            allow="autoplay; encrypted-media"
+            allowFullScreen
+          />
+        ) : (
+          <video 
+            ref={videoRef}
+            src={video.url}
+            className="w-full h-full object-contain"
+            autoPlay
+            controls
+            playsInline
+          />
+        )}
+        <button 
+          onClick={onClose}
+          className="absolute top-4 left-4 p-3 bg-black/40 hover:bg-black/60 backdrop-blur-xl rounded-full text-white z-10 border border-white/10 transition-all active:scale-90"
+        >
+          <ArrowLeft size={20} />
+        </button>
+      </div>
+
+      {/* Info & Description Section below (Scrollable) */}
+      <div className="flex-1 overflow-y-auto no-scrollbar pb-40">
+        <div className="max-w-screen-xl mx-auto px-4 md:px-8 py-8 space-y-8">
+           
+           {/* Metadata Area */}
+           <motion.div 
+             initial={{ opacity: 0, x: -20 }}
+             animate={{ opacity: 1, x: 0 }}
+             transition={{ delay: 0.2 }}
+             className="space-y-4"
+           >
+              <div className="flex flex-wrap gap-2">
+                 {video.tags.map(t => (
+                   <span key={t} className="text-[10px] text-lumina-blue font-black uppercase tracking-[0.2em] px-3 py-1 bg-lumina-blue/10 rounded-full border border-lumina-blue/20">
+                     #{t}
+                   </span>
+                 ))}
+              </div>
+              <h1 className="text-3xl md:text-4xl font-black text-white leading-tight tracking-tight">
+                {video.title}
+              </h1>
+              
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 py-4 border-b border-white/5">
+                 <div className="flex items-center gap-2 text-sm text-white/40 font-bold">
+                    <span className="flex items-center gap-1.5"><Play size={14} className="fill-current" /> {video.stats.views} Views</span>
+                    <span className="w-1 h-1 rounded-full bg-white/10" />
+                    <span>2 days ago</span>
+                 </div>
+                 <div className="flex items-center gap-3 overflow-x-auto no-scrollbar">
+                    <button className="flex items-center gap-2 px-6 py-2.5 glass rounded-2xl text-white font-black text-[10px] uppercase hover:bg-white/10 transition-all border border-white/5 shadow-xl">
+                       <ThumbsUp size={16} /> {video.stats.likes}
+                    </button>
+                    <button className="flex items-center gap-2 px-6 py-2.5 glass rounded-2xl text-white font-black text-[10px] uppercase hover:bg-white/10 transition-all border border-white/5 shadow-xl">
+                       <Share2 size={16} /> Share
+                    </button>
+                    <button className="flex items-center gap-2 px-6 py-2.5 glass rounded-2xl text-white font-black text-[10px] uppercase hover:bg-white/10 transition-all border border-white/5 shadow-xl">
+                       <Bookmark size={16} /> Save
+                    </button>
+                    <button className="flex items-center justify-center w-[46px] h-[46px] glass rounded-2xl text-white hover:bg-white/10 transition-all border border-white/5 shadow-xl">
+                       <MoreVertical size={18} />
+                    </button>
+                 </div>
+              </div>
+           </motion.div>
+
+           {/* Channel Interactions */}
+           <motion.div 
+             initial={{ opacity: 0, y: 20 }}
+             animate={{ opacity: 1, y: 0 }}
+             transition={{ delay: 0.3 }}
+             className="flex items-center justify-between p-6 bg-white/[0.03] backdrop-blur-3xl rounded-[32px] border border-white/5 shadow-2xl"
+           >
+              <div className="flex items-center gap-5">
+                 <div className="relative group">
+                   <div className="absolute inset-0 bg-lumina-blue/20 blur-xl opacity-0 group-hover:opacity-100 transition-opacity" />
+                   <img src={video.creator.avatar} className="w-16 h-16 rounded-full border-2 border-white/10 shrink-0 relative z-10" alt="" />
+                 </div>
+                 <div>
+                    <div className="flex items-center gap-2">
+                       <h3 className="font-black text-white text-xl">{video.creator.name}</h3>
+                       <div className="p-1 bg-lumina-blue/20 rounded-lg">
+                          <CheckCircle size={14} className="text-lumina-blue" />
+                       </div>
+                    </div>
+                    <span className="text-xs text-white/40 font-medium tracking-wide">
+                      {isSubscribed ? 'Loyal Neural Member' : '1.2M Neural Citizens'}
+                    </span>
+                 </div>
+              </div>
+              <button 
+                onClick={toggleSubscription}
+                disabled={isSyncing}
+                className={`px-10 py-4 rounded-2xl font-black text-xs uppercase tracking-widest transition-all duration-500 relative overflow-hidden group ${
+                  isSubscribed 
+                  ? 'bg-white/10 text-white border border-white/10 hover:bg-white/20' 
+                  : 'bg-lumina-gradient text-white shadow-[0_15px_30px_rgba(255,105,180,0.2)] hover:shadow-[0_20px_40px_rgba(30,144,255,0.4)] hover:scale-105 active:scale-95'
+                }`}
+              >
+                 <span className="relative z-10 flex items-center gap-2">
+                   {isSyncing ? (
+                     <>
+                        <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        <span>Syncing</span>
+                     </>
+                   ) : isSubscribed ? 'Subscribed' : 'Join Network'}
+                 </span>
+                 {!isSubscribed && (
+                   <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/10 to-white/0 -translate-x-[100%] group-hover:translate-x-[100%] transition-transform duration-1000" />
+                 )}
+              </button>
+           </motion.div>
+
+           {/* Metadata Box */}
+           <motion.div 
+             initial={{ opacity: 0, y: 20 }}
+             animate={{ opacity: 1, y: 0 }}
+             transition={{ delay: 0.4 }}
+             className="p-8 bg-white/[0.02] border border-white/5 rounded-[40px] shadow-inner"
+           >
+              <div className="flex items-center gap-3 mb-6">
+                 <div className="w-1.5 h-6 bg-lumina-blue rounded-full shadow-[0_0_10px_#1e90ff]" />
+                 <h4 className="text-xs font-black uppercase text-white tracking-[0.3em]">Neural Transcript</h4>
+              </div>
+              <p className="text-white/60 leading-relaxed text-base">
+                {video.description}
+              </p>
+              
+              <div className="mt-8 pt-8 border-t border-white/5 grid grid-cols-2 md:grid-cols-4 gap-6">
+                 <div>
+                    <div className="text-[10px] font-black text-white/20 uppercase tracking-widest mb-1">Resolution</div>
+                    <div className="text-xs font-black text-lumina-blue">{video.qualityLabel || '4K NEURAL'}</div>
+                 </div>
+                 <div>
+                    <div className="text-[10px] font-black text-white/20 uppercase tracking-widest mb-1">Interpolation</div>
+                    <div className="text-xs font-black text-lumina-blue">Adaptive AI v4</div>
+                 </div>
+                 <div>
+                    <div className="text-[10px] font-black text-white/20 uppercase tracking-widest mb-1">Audio Sync</div>
+                    <div className="text-xs font-black text-lumina-blue">Lossless Spatial</div>
+                 </div>
+                 <div>
+                    <div className="text-[10px] font-black text-white/20 uppercase tracking-widest mb-1">Render Date</div>
+                    <div className="text-xs font-black text-lumina-blue">April 2026</div>
+                 </div>
+              </div>
+           </motion.div>
+
+           {/* Enhanced Comments Section */}
+           <motion.div 
+             initial={{ opacity: 0, y: 20 }}
+             animate={{ opacity: 1, y: 0 }}
+             transition={{ delay: 0.5 }}
+             className="space-y-8"
+           >
+              <div className="flex items-center justify-between">
+                 <h3 className="text-2xl font-black text-white tracking-tight flex items-center gap-3">
+                   Neural Feed 
+                   <span className="text-sm font-bold text-white/20 bg-white/5 px-3 py-1 rounded-lg border border-white/5">{video.stats.comments}</span>
+                 </h3>
+                 <button className="text-xs font-black text-lumina-blue uppercase tracking-widest flex items-center gap-2 hover:opacity-80 transition-opacity">
+                    <Filter size={16} /> Sort by Relevance
+                 </button>
+              </div>
+
+              <div className="flex gap-4 p-6 bg-white/[0.03] border border-white/5 rounded-[32px] focus-within:border-lumina-blue/30 transition-all group">
+                 <div className="w-12 h-12 rounded-full overflow-hidden shrink-0 border border-white/10 group-focus-within:border-lumina-blue/50">
+                    <img src={user?.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.uid || 'guest'}`} className="w-full h-full object-cover" alt="" />
+                 </div>
+                 <div className="flex-1 space-y-4">
+                    <textarea 
+                      placeholder="Share your neural insight..."
+                      className="w-full bg-transparent border-none text-white focus:outline-none resize-none text-sm placeholder:text-white/20 pt-3"
+                      rows={1}
+                    />
+                    <div className="flex justify-end pt-2">
+                       <button className="px-6 py-2 bg-lumina-blue/10 text-lumina-blue border border-lumina-blue/20 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-lumina-blue hover:text-white transition-all">
+                          Inject Comment
+                       </button>
+                    </div>
+                 </div>
+              </div>
+
+              <div className="space-y-4">
+                 {[1,2,3].map(i => (
+                   <motion.div 
+                     key={i} 
+                     initial={{ opacity: 0, x: -10 }}
+                     whileInView={{ opacity: 1, x: 0 }}
+                     viewport={{ once: true }}
+                     className="flex gap-5 p-6 rounded-[32px] hover:bg-white/[0.02] transition-colors border border-transparent hover:border-white/5"
+                   >
+                      <div className="w-12 h-12 rounded-full bg-lumina-gradient border-2 border-white/5 shrink-0 shadow-lg" />
+                      <div className="flex-1 space-y-2">
+                         <div className="flex items-center gap-3">
+                            <span className="text-sm font-black text-white hover:text-lumina-blue cursor-pointer">NeuralExplorer_{i}88</span>
+                            <span className="text-[10px] text-white/20 font-bold uppercase tracking-tighter">4 hours ago</span>
+                            <div className="p-0.5 bg-lumina-blue/10 text-lumina-blue rounded text-[8px] font-black tracking-[0.1em] uppercase px-1.5">Alpha Member</div>
+                         </div>
+                         <p className="text-sm text-white/60 leading-relaxed max-w-2xl">
+                           The cinematic color grading on the masterclass segments is breathtaking. It feels like every frame has been meticulously tuned for high dynamic range. Tanjia v2 is really pushing the boundaries of what's possible.
+                         </p>
+                         <div className="flex gap-6 pt-3">
+                            <button className="flex items-center gap-2 text-[10px] font-black text-white/20 hover:text-lumina-pink transition-colors">
+                               <Heart size={14} /> 128
+                            </button>
+                            <button className="flex items-center gap-2 text-[10px] font-black text-white/20 hover:text-lumina-blue transition-colors">
+                               <MessageCircle size={14} /> Reply
+                            </button>
+                         </div>
+                      </div>
+                   </motion.div>
+                 ))}
+              </div>
+           </motion.div>
+        </div>
+      </div>
+      
+      {/* Floating Sparkles for AI Interaction */}
+      <AnimatePresence>
+        <motion.button 
+          initial={{ scale: 0, rotate: -45 }}
+          animate={{ scale: 1, rotate: 0 }}
+          whileHover={{ scale: 1.1 }}
+          whileTap={{ scale: 0.9 }}
+          onClick={() => onOpenAI(video)}
+          className="fixed bottom-32 right-8 p-5 bg-lumina-gradient rounded-full text-white shadow-[0_20px_50px_rgba(255,105,180,0.4)] z-50 border border-white/20"
+        >
+          <Sparkles size={32} />
+          <motion.div 
+            animate={{ scale: [1, 1.5, 1], opacity: [0.3, 0.6, 0.3] }}
+            transition={{ duration: 2, repeat: Infinity }}
+            className="absolute inset-0 bg-white rounded-full blur-xl"
+          />
+        </motion.button>
+      </AnimatePresence>
+    </motion.div>
+  );
+};
+
+
+const ShortsCard = ({ video, onOpenAI, onSelect }: { video: Video, onOpenAI: (v: Video) => void, onSelect: () => void }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(true);
+  const [showControls, setShowControls] = useState(true);
+  const [progress, setProgress] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const controlsTimeout = useRef<NodeJS.Timeout | null>(null);
+  const ytId = getYoutubeId(video.url);
+
+  const handleTimeUpdate = () => {
+    if (videoRef.current) {
+      const p = (videoRef.current.currentTime / videoRef.current.duration) * 100;
+      setProgress(p || 0);
+    }
+  };
+
+  const resetControlsTimer = () => {
+    setShowControls(true);
+    if (controlsTimeout.current) clearTimeout(controlsTimeout.current);
+    controlsTimeout.current = setTimeout(() => setShowControls(false), 3000);
+  };
+
+  useEffect(() => {
+    resetControlsTimer();
+    return () => {
+      if (controlsTimeout.current) clearTimeout(controlsTimeout.current);
+    };
+  }, []);
 
   useEffect(() => {
     const observer = new IntersectionObserver(
@@ -245,7 +781,11 @@ const ShortsCard = ({ video, onOpenAI }: { video: Video, onOpenAI: (v: Video) =>
     };
   }, []);
 
-  const togglePlay = () => {
+  const togglePlay = (e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation();
+      resetControlsTimer();
+    }
     if (videoRef.current) {
       if (isPlaying) {
         videoRef.current.pause();
@@ -257,150 +797,191 @@ const ShortsCard = ({ video, onOpenAI }: { video: Video, onOpenAI: (v: Video) =>
     }
   };
 
-  return (
-    <div ref={containerRef} className="relative w-full max-w-[400px] h-[80vh] min-h-[600px] max-h-[850px] bg-black rounded-[40px] overflow-hidden shadow-2xl border border-white/10 group">
-      {/* Video Element */}
-      <video 
-        ref={videoRef}
-        src={video.url}
-        className="w-full h-full object-cover cursor-pointer"
-        loop
-        muted={isMuted}
-        playsInline
-        onClick={togglePlay}
-        onError={(e) => {
-          const videoTarget = e.currentTarget;
-          console.error("Neural Cinema: Video source error", {
-            src: videoTarget.src,
-            error: videoTarget.error ? {
-              code: videoTarget.error.code,
-              message: videoTarget.error.message
-            } : "Unknown error"
-          });
-        }}
-      />
+  const toggleMute = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    resetControlsTimer();
+    setIsMuted(!isMuted);
+  };
 
-      {/* Play/Pause Button Animation (Center) */}
+  return (
+    <div 
+      ref={containerRef} 
+      onClick={(e) => {
+        if (showControls) {
+          onSelect();
+        } else {
+          resetControlsTimer();
+        }
+      }}
+      onMouseMove={resetControlsTimer}
+      className="relative w-full max-w-[400px] h-[80vh] min-h-[600px] max-h-[850px] bg-black rounded-[40px] overflow-hidden shadow-2xl border border-white/10 group cursor-pointer"
+    >
+      {ytId ? (
+        <img 
+          src={video.thumbnail} 
+          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" 
+          alt="" 
+        />
+      ) : (
+        <video 
+          ref={videoRef}
+          src={video.url}
+          onTimeUpdate={handleTimeUpdate}
+          className="w-full h-full object-cover"
+          loop
+          muted={isMuted}
+          playsInline
+        />
+      )}
+
+      {/* Play/Pause Central Overlay */}
       <AnimatePresence>
-        {!isPlaying && (
+        {showControls && (
           <motion.div 
-            initial={{ opacity: 0, scale: 0.5 }}
+            initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.5 }}
-            className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none"
+            exit={{ opacity: 0, scale: 0.9 }}
+            className="absolute inset-0 z-20 flex items-center justify-center bg-black/20 pointer-events-none"
           >
-            <div className="p-8 bg-black/40 backdrop-blur-xl rounded-full border border-white/10">
-              <Play fill="currentColor" size={40} className="text-white ml-1" />
+            <div className="relative group/btn pointer-events-auto">
+              {/* Circular Progress Bar */}
+              <svg className="absolute -inset-2 -rotate-90 w-[calc(100%+16px)] h-[calc(100%+16px)] pointer-events-none">
+                <circle
+                  cx="50%"
+                  cy="50%"
+                  r="48%"
+                  fill="none"
+                  stroke="white"
+                  strokeWidth="2"
+                  strokeOpacity="0.1"
+                />
+                <motion.circle
+                  cx="50%"
+                  cy="50%"
+                  r="48%"
+                  fill="none"
+                  stroke="url(#progress-gradient-shorts)"
+                  strokeWidth="2"
+                  strokeDasharray="100 100"
+                  pathLength="100"
+                  initial={{ strokeDashoffset: 100 }}
+                  animate={{ strokeDashoffset: 100 - progress }}
+                  strokeLinecap="round"
+                  className="transition-all duration-300"
+                />
+                <defs>
+                   <linearGradient id="progress-gradient-shorts" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stopColor="#ff69b4" />
+                      <stop offset="100%" stopColor="#1e90ff" />
+                   </linearGradient>
+                </defs>
+              </svg>
+
+              <motion.button 
+                whileTap={{ scale: 0.8 }}
+                onClick={togglePlay}
+                className="p-6 bg-white/20 backdrop-blur-3xl rounded-full border border-white/30 text-white shadow-2xl relative z-10"
+              >
+                {isPlaying ? <Pause fill="currentColor" size={32} /> : <Play fill="currentColor" size={32} className="ml-1" />}
+              </motion.button>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Overlays */}
-      <div className="absolute inset-x-0 bottom-0 p-6 bg-gradient-to-t from-black/80 via-black/40 to-transparent">
-        <div className="flex items-end justify-between gap-4">
-          <div className="flex-1 space-y-4">
-            <div className="flex items-center gap-3">
-              <img src={video.creator.avatar} className="w-10 h-10 rounded-full border border-white/20" alt="" />
-              <span className="font-bold text-white shadow-sm">{video.creator.name}</span>
-              <button className="bg-lumina-pink px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider shadow-lg">Follow</button>
-            </div>
-            <h3 className="text-white text-lg font-medium leading-tight">{video.title}</h3>
-            <p className="text-white/70 text-xs line-clamp-2">{video.description}</p>
-            <div className="flex gap-2">
-              {video.tags.map(t => <span key={t} className="text-[10px] text-lumina-blue font-bold px-2 py-0.5 bg-lumina-blue/10 rounded-md">#{t}</span>)}
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-6 items-center">
-            <div className="flex flex-col items-center gap-1">
-              <button className="p-3 bg-white/10 backdrop-blur-md rounded-full text-white hover:bg-white/20 transition-all active:scale-90">
-                <Heart size={24} fill="currentColor" className="text-lumina-pink" />
-              </button>
-              <span className="text-[10px] font-bold text-white">{video.stats.likes}</span>
-            </div>
-            <div className="flex flex-col items-center gap-1">
-              <button className="p-3 bg-white/10 backdrop-blur-md rounded-full text-white hover:bg-white/20 transition-all active:scale-90">
-                <MessageCircle size={24} />
-              </button>
-              <span className="text-[10px] font-bold text-white">{video.stats.comments}</span>
-            </div>
-            <button className="p-3 bg-white/10 backdrop-blur-md rounded-full text-white hover:bg-white/20 transition-all">
-              <Share2 size={24} />
-            </button>
-            <button className="p-3 bg-white/10 backdrop-blur-md rounded-full text-white hover:bg-white/20 transition-all">
-              <Bookmark size={24} />
-            </button>
-            
-            {/* AI Integration Trigger */}
+      {/* Mute Toggle Overlay */}
+      <AnimatePresence>
+        {showControls && (
+          <motion.div 
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 10 }}
+            className="absolute top-8 right-8 z-30"
+          >
             <button 
-              onClick={() => onOpenAI(video)}
-              className="p-3 bg-lumina-gradient rounded-full text-white shadow-lg shadow-lumina-blue/20 animate-pulse active:scale-90 transition-all"
+              onClick={toggleMute}
+              className="p-3 glass rounded-2xl text-white border border-white/10 hover:bg-white/20 transition-all"
             >
-              <Sparkles size={24} />
+              {isMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}
             </button>
-          </div>
-        </div>
-      </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      {/* Top Bar Indicators */}
-      <div className="absolute top-6 left-6 right-6 flex justify-between items-center z-10">
-        <div className="flex gap-1 h-0.5 flex-1 bg-white/20 rounded-full overflow-hidden mr-4">
-           <motion.div 
-             initial={{ width: 0 }}
-             animate={{ width: "100%" }}
-             transition={{ duration: 15, repeat: Infinity, ease: "linear" }}
-             className="bg-white h-full"
-           />
-        </div>
-        <button onClick={() => setIsMuted(!isMuted)} className="text-white/60 hover:text-white">
-          {isMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}
-        </button>
+      <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent flex flex-col justify-end p-8 pointer-events-none">
+         <div className="flex items-center gap-3 mb-4">
+            <img src={video.creator.avatar} className="w-10 h-10 rounded-full border border-white/20" alt="" />
+            <span className="font-bold text-white uppercase text-[10px] tracking-widest">{video.creator.name}</span>
+         </div>
+         <h3 className="text-white text-lg font-black mb-2 line-clamp-1">{video.title}</h3>
       </div>
-
-      {!isPlaying && (
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <Play size={64} className="text-white/40" />
-        </div>
-      )}
+      <div className="absolute bottom-8 right-6">
+         <div className="w-12 h-12 rounded-full bg-white/10 backdrop-blur-3xl border border-white/20 flex items-center justify-center text-white">
+            <Sparkles size={20} className="text-lumina-blue" />
+         </div>
+      </div>
     </div>
   );
 };
 
-const LongFormCard = ({ video, onOpenAI }: { video: Video, onOpenAI: (v: Video) => void }) => {
+const LongFormCard = ({ video, onOpenAI, onClick }: { video: Video, onOpenAI: (v: Video) => void, onClick: () => void }) => {
   return (
     <motion.div 
       whileHover={{ y: -5 }}
-      className="bg-white/[0.03] border border-white/5 rounded-[32px] overflow-hidden group/card shadow-xl"
+      className="bg-white/[0.02] border border-white/5 rounded-[40px] overflow-hidden group/card shadow-2xl transition-all hover:bg-white/[0.05]"
     >
       <div className="relative aspect-video">
-        <img src={video.thumbnail} className="w-full h-full object-cover transition-transform duration-700 group-hover/card:scale-110" alt="" />
+        <img src={video.thumbnail} className="w-full h-full object-cover transition-transform duration-1000 group-hover/card:scale-110" alt="" />
         <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/card:opacity-100 transition-opacity flex items-center justify-center">
-          <PlayCircle size={64} className="text-white" />
+          <div className="w-16 h-16 rounded-full bg-white/20 backdrop-blur-xl border border-white/30 flex items-center justify-center text-white scale-75 group-hover/card:scale-100 transition-transform duration-300">
+            <Play fill="currentColor" size={24} className="ml-1" />
+          </div>
         </div>
-        <div className="absolute bottom-4 right-4 bg-black/80 px-2 py-0.5 rounded-md text-[10px] font-bold text-white border border-white/10">
-          12:45
+        
+        {/* Cinematic Labels */}
+        <div className="absolute top-4 left-4 flex gap-2">
+           {video.qualityLabel && (
+             <div className="px-3 py-1 bg-lumina-blue/20 backdrop-blur-md border border-lumina-blue/30 rounded-lg text-[10px] font-black text-lumina-blue tracking-tighter uppercase">
+                {video.qualityLabel} CINEMA
+             </div>
+           )}
+        </div>
+        
+        <div className="absolute bottom-4 right-4 bg-black/60 backdrop-blur-md px-3 py-1 rounded-full text-xs font-bold text-white border border-white/10 shadow-lg">
+          {video.durationLabel || '12:45'}
         </div>
       </div>
-      <div className="p-6 space-y-4">
-        <div className="flex gap-4">
-          <img src={video.creator.avatar} className="w-12 h-12 rounded-full border border-white/10 shadow-lg" alt="" />
-          <div className="flex-1">
-            <h3 className="text-xl font-bold text-white line-clamp-2 leading-tight group-hover/card:text-lumina-blue transition-colors">
+      <div className="p-8 space-y-4">
+        <div className="flex gap-5">
+          <div className="relative shrink-0">
+            <img src={video.creator.avatar} className="w-12 h-12 rounded-full border-2 border-white/10 shadow-2xl transition-transform group-hover/card:scale-110" alt="" />
+            <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-lumina-blue rounded-full border-2 border-[#050505] flex items-center justify-center">
+               <CheckCircle size={10} className="text-white" />
+            </div>
+          </div>
+          <div className="flex-1 min-w-0">
+            <h3 className="text-xl font-black text-white line-clamp-2 leading-tight group-hover/card:text-lumina-blue transition-colors tracking-tight">
               {video.title}
             </h3>
-            <p className="text-white/40 text-sm mt-1">{video.creator.name} • {video.stats.views} views</p>
+            <div className="flex items-center gap-2 mt-2">
+               <span className="text-white/40 text-xs font-bold uppercase tracking-widest">{video.creator.name}</span>
+               <span className="w-1 h-1 rounded-full bg-white/10" />
+               <span className="text-white/20 text-xs font-medium">{video.stats.views} Views</span>
+            </div>
           </div>
           <button 
             onClick={() => onOpenAI(video)}
-            className="self-start p-2 bg-white/5 rounded-full text-white/40 hover:text-white hover:bg-lumina-blue/20 transition-all"
+            className="self-start p-3 bg-white/[0.05] rounded-2xl text-white/40 hover:text-white hover:bg-lumina-blue/20 transition-all border border-transparent hover:border-lumina-blue/30 active:scale-95"
           >
-            <Sparkles size={20} />
+            <Sparkles size={22} />
           </button>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <p className="text-white/40 text-sm line-clamp-2 leading-relaxed font-medium">
+          {video.description}
+        </p>
+        <div className="flex flex-wrap gap-2 pt-2">
            {video.tags.map(t => (
-             <span key={t} className="text-[10px] text-white/30 font-bold uppercase tracking-wider px-3 py-1 bg-white/5 rounded-full border border-white/5">
+             <span key={t} className="text-[10px] text-white/30 font-bold uppercase tracking-widest px-4 py-1.5 bg-white/5 rounded-full border border-white/5 hover:bg-white/10 transition-colors">
                 {t}
              </span>
            ))}

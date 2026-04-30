@@ -23,11 +23,11 @@ import {
   PieChart, Pie, Cell, LineChart, Line, AreaChart, Area
 } from 'recharts';
 
-import { auth, signInWithGoogle, db } from './lib/firebase';
+import { auth, signInWithGoogle, db, OperationType, handleFirestoreError } from './lib/firebase';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 
-type Mode = 'search' | 'ai';
+type Mode = 'search' | 'ai' | 'image';
 
 interface Message {
   id: string;
@@ -55,6 +55,8 @@ interface Video {
   title: string;
   description: string;
   type: ContentType;
+  qualityLabel?: string;
+  durationLabel?: string;
   stats: {
     views: string;
     likes: string;
@@ -72,6 +74,8 @@ const MOCK_VIDEOS: Video[] = [
     thumbnail: 'https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=800',
     title: 'Neon Dreams: The AI Future',
     description: 'Exploring the neon-lit streets of the neural network.',
+    qualityLabel: 'HDR',
+    durationLabel: '0:34',
     stats: { views: '1.2M', likes: '450K', comments: '12K' },
     tags: ['ai', 'cyberpunk', 'future']
   },
@@ -83,8 +87,23 @@ const MOCK_VIDEOS: Video[] = [
     thumbnail: 'https://images.unsplash.com/photo-1620641788421-7a1c342ea42e?w=800',
     title: 'Abstract Synthesis',
     description: 'When the AI starts dreaming of fluid dynamics.',
+    qualityLabel: '8K',
+    durationLabel: '0:45',
     stats: { views: '890K', likes: '120K', comments: '5K' },
     tags: ['abstract', 'fluid', 'ai-art']
+  },
+  {
+    id: 's3',
+    type: 'short',
+    creator: { id: 'u3', name: 'InfiniteVisions', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Vision' },
+    url: 'https://videos.pexels.com/video-files/2759484/2759484-sd_360_640_30fps.mp4',
+    thumbnail: 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=800',
+    title: 'Satellite Dreams',
+    description: 'Orbital perspectives generated via neural interpolation.',
+    qualityLabel: '4K',
+    durationLabel: '0:58',
+    stats: { views: '2.1M', likes: '900K', comments: '42K' },
+    tags: ['space', 'satellite', 'earth']
   },
   {
     id: 'l1',
@@ -92,10 +111,38 @@ const MOCK_VIDEOS: Video[] = [
     creator: { id: 'u1', name: 'CyberTanjia', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Tanjia' },
     url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
     thumbnail: 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=800',
-    title: 'Full Length Documentary: The Era of Neural Cinema',
-    description: 'A deep dive into how generative AI is transforming the way we consume and create motion pictures.',
+    title: 'Neural Cinema: The New Renaissance',
+    description: 'An immersive journey through the evolution of generative media and the artists leading the charge.',
+    qualityLabel: '4K',
+    durationLabel: '14:20',
     stats: { views: '2.5M', likes: '300K', comments: '25K' },
     tags: ['documentary', 'cinema', 'tech-deep-dive']
+  },
+  {
+    id: 'l2',
+    type: 'long',
+    creator: { id: 'u4', name: 'StudioQuantum', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Quantum' },
+    url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
+    thumbnail: 'https://images.unsplash.com/photo-1485846234645-a62644f84728?w=800',
+    title: 'Quantum Horizons: Episode 1',
+    description: 'Speculative fiction rendered in real-time using neural radiance fields.',
+    qualityLabel: '4K Ultra',
+    durationLabel: '22:15',
+    stats: { views: '5.6M', likes: '1.2M', comments: '88K' },
+    tags: ['scifi', 'quantum', 'render']
+  },
+  {
+    id: 'l3',
+    type: 'long',
+    creator: { id: 'u2', name: 'NeuralCore', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Core' },
+    url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4',
+    thumbnail: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=800',
+    title: 'Synthetica: The Last City',
+    description: 'A cinematic masterpiece exploring a world where binary is the only language left.',
+    qualityLabel: '8K Master',
+    durationLabel: '18:50',
+    stats: { views: '12M', likes: '3.4M', comments: '210K' },
+    tags: ['cinematic', 'future', 'masterpiece']
   }
 ];
 
@@ -307,7 +354,27 @@ const NeuralProcessingIndicator = () => {
     );
 };
 
+import { fetchCinemaVideos } from './services/youtubeService';
+
 export default function App() {
+  const [selectedVideo, setSelectedVideo] = useState<Video | null>(null);
+  const [videos, setVideos] = useState<Video[]>([]);
+  const [isLoadingVideos, setIsLoadingVideos] = useState(true);
+
+  useEffect(() => {
+    const loadVideos = async () => {
+      setIsLoadingVideos(true);
+      const ytVideos = await fetchCinemaVideos('cinema cinematography movie trailers');
+      if (ytVideos.length > 0) {
+        setVideos(ytVideos);
+      } else {
+        // Fallback to internal mock if API fails
+        setVideos(MOCK_VIDEOS);
+      }
+      setIsLoadingVideos(false);
+    };
+    loadVideos();
+  }, []);
   const [mode, setMode] = useState<Mode>('search');
   const [query, setQuery] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
@@ -362,15 +429,19 @@ export default function App() {
       if (u) {
         // Sync profile to Firestore
         const userRef = doc(db, 'users', u.uid);
-        const snap = await getDoc(userRef);
-        if (!snap.exists()) {
-          await setDoc(userRef, {
-            uid: u.uid,
-            email: u.email,
-            displayName: u.displayName,
-            photoURL: u.photoURL,
-            createdAt: serverTimestamp()
-          });
+        try {
+          const snap = await getDoc(userRef);
+          if (!snap.exists()) {
+            await setDoc(userRef, {
+              uid: u.uid,
+              email: u.email,
+              displayName: u.displayName,
+              photoURL: u.photoURL,
+              createdAt: serverTimestamp()
+            });
+          }
+        } catch (error) {
+          handleFirestoreError(error, OperationType.WRITE, `users/${u.uid}`);
         }
       }
     });
@@ -380,6 +451,10 @@ export default function App() {
   useEffect(() => {
     scrollToBottom();
   }, [messages, isTyping, isSearching]);
+
+  useEffect(() => {
+    if (!selectedVideo) setShowVideoSearch(false);
+  }, [selectedVideo]);
 
   const startNewChat = () => {
     if (messages.length > 0) {
@@ -451,6 +526,7 @@ export default function App() {
   
   const { scrollY } = useScroll({ container: scrollRef });
   const [headerVisible, setHeaderVisible] = useState(true);
+  const [showVideoSearch, setShowVideoSearch] = useState(false);
   const lastScrollY = useRef(0);
 
   useMotionValueEvent(scrollY, "change", (latest) => {
@@ -716,10 +792,12 @@ export default function App() {
           <CinemaSection 
             viewMode={viewMode as any} 
             setViewMode={setViewMode as any} 
-            videos={MOCK_VIDEOS} 
+            videos={videos} 
             user={user}
             searchMode={searchMode}
             searchQuery={lastExecutedQuery}
+            selectedVideo={selectedVideo}
+            onSelectVideo={setSelectedVideo}
             onResetSearch={() => {
               setSearchMode('ai');
               setLastExecutedQuery('');
@@ -1045,7 +1123,8 @@ export default function App() {
 
     // Detect image generation request
     const lowerQuery = (userMessage.content || '').toLowerCase();
-    const isImageReq = lowerQuery.startsWith('/image') || 
+    const isImageReq = mode === 'image' || 
+                       lowerQuery.startsWith('/image') || 
                        lowerQuery.includes('generate an image') || 
                        lowerQuery.includes('create an image') ||
                        lowerQuery.includes('ছবি তৈরি করো');
@@ -1074,7 +1153,7 @@ export default function App() {
           isStreaming: true
         }]);
 
-        const generatedImageUrl = await generateImageWithGemini(generationPrompt, filters.aspectRatio);
+        const generatedImageUrl = await generateImageWithGemini(generationPrompt, filters.aspectRatio, filters.artStyle);
         
         // Save to prompt history
         setImagePromptHistory(prev => {
@@ -2582,7 +2661,7 @@ export default function App() {
 
       {/* Floating Bottom Input Area - ANIMATED */}
       <AnimatePresence>
-        {(['home', 'search', 'inbox'].includes(activeTab as string)) && (
+        {(['home', 'search', 'inbox'].includes(activeTab as string) || (activeTab === 'cinema' && showVideoSearch)) && (!selectedVideo || showVideoSearch) && (
           <motion.div 
             initial={{ y: 200, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
@@ -2600,6 +2679,12 @@ export default function App() {
                             AI Neural
                         </button>
                         <button 
+                            onClick={() => { setMode('image'); triggerHaptic('light'); }}
+                            className={`px-3 py-1.5 rounded-full text-[8px] font-black uppercase tracking-widest transition-all duration-300 ${mode === 'image' ? 'bg-violet-500/20 text-violet-400 shadow-xl border border-violet-500/30' : 'text-white/20 hover:text-white/40'}`}
+                        >
+                            Vision
+                        </button>
+                        <button 
                             onClick={() => { setMode('search'); triggerHaptic('light'); }}
                             className={`px-3 py-1.5 rounded-full text-[8px] font-black uppercase tracking-widest transition-all duration-300 ${mode === 'search' ? 'bg-white/10 text-white shadow-xl' : 'text-white/20 hover:text-white/40'}`}
                         >
@@ -2608,18 +2693,49 @@ export default function App() {
                     </div>
 
                     <div className="flex items-center gap-1 p-1 glass rounded-full border-white/10 scale-90 -mr-2">
-                        <button 
-                          onClick={() => setThinkingMode('fast')}
-                          className={`px-3 py-1.5 rounded-full text-[8px] font-black uppercase tracking-widest transition-all ${thinkingMode === 'fast' ? 'bg-white/10 text-white shadow-xl' : 'text-white/20 hover:text-white/40'}`}
-                        >
-                          Fast
-                        </button>
-                        <button 
-                          onClick={() => setThinkingMode('think')}
-                          className={`px-3 py-1.5 rounded-full text-[8px] font-black uppercase tracking-widest transition-all ${thinkingMode === 'think' ? 'bg-pink-500/20 text-pink-300 shadow-xl border border-pink-500/30' : 'text-white/20 hover:text-white/40'}`}
-                        >
-                          Think
-                        </button>
+                        {mode === 'image' ? (
+                          <div className="flex items-center gap-2 px-2">
+                            <select 
+                              value={filters.aspectRatio}
+                              onChange={(e) => setFilters(prev => ({ ...prev, aspectRatio: e.target.value as any }))}
+                              className="bg-transparent text-[8px] font-black text-white outline-none cursor-pointer uppercase tracking-widest"
+                            >
+                              <option value="1:1" className="bg-black">1:1 Square</option>
+                              <option value="16:9" className="bg-black">16:9 Wide</option>
+                              <option value="9:16" className="bg-black">9:16 Tall</option>
+                            </select>
+                            <span className="w-px h-3 bg-white/10" />
+                            <select 
+                              value={filters.artStyle}
+                              onChange={(e) => setFilters(prev => ({ ...prev, artStyle: e.target.value as any }))}
+                              className="bg-transparent text-[8px] font-black text-white outline-none cursor-pointer uppercase tracking-widest"
+                            >
+                              <option value="none" className="bg-black">No Style</option>
+                              <option value="photorealistic" className="bg-black">Photo</option>
+                              <option value="abstract" className="bg-black">Abstract</option>
+                              <option value="cartoon" className="bg-black">Cartoon</option>
+                              <option value="cyberpunk" className="bg-black">Cyberpunk</option>
+                              <option value="sketch" className="bg-black">Sketch</option>
+                              <option value="oil-painting" className="bg-black">Oil</option>
+                              <option value="3d-render" className="bg-black">3D</option>
+                            </select>
+                          </div>
+                        ) : (
+                          <>
+                            <button 
+                              onClick={() => setThinkingMode('fast')}
+                              className={`px-3 py-1.5 rounded-full text-[8px] font-black uppercase tracking-widest transition-all ${thinkingMode === 'fast' ? 'bg-white/10 text-white shadow-xl' : 'text-white/20 hover:text-white/40'}`}
+                            >
+                              Fast
+                            </button>
+                            <button 
+                              onClick={() => setThinkingMode('think')}
+                              className={`px-3 py-1.5 rounded-full text-[8px] font-black uppercase tracking-widest transition-all ${thinkingMode === 'think' ? 'bg-pink-500/20 text-pink-300 shadow-xl border border-pink-500/30' : 'text-white/20 hover:text-white/40'}`}
+                            >
+                              Think
+                            </button>
+                          </>
+                        )}
                     </div>
                 </div>
 
@@ -2638,7 +2754,7 @@ export default function App() {
                                 value={query}
                                 onChange={(e) => setQuery(e.target.value)}
                                 onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-                                placeholder={mode === 'search' ? "Explore neural cinema..." : "Ask TANJIA AI anything..."}
+                                placeholder={mode === 'search' ? "Explore neural cinema..." : mode === 'image' ? "Describe the image you want to generate..." : "Ask TANJIA AI anything..."}
                                 className="flex-1 bg-transparent border-none outline-none text-sm px-4 font-medium text-white placeholder:text-white/20 w-0"
                             />
 
@@ -2653,7 +2769,7 @@ export default function App() {
                                     onClick={() => handleSend()} 
                                     className="p-3.5 bg-lumina-gradient text-white rounded-2xl hover:brightness-110 active:scale-95 transition-all shadow-xl shadow-pink-500/20 flex-shrink-0"
                                 >
-                                    {mode === 'search' ? <Search size={20} strokeWidth={3} /> : <ArrowRight size={20} strokeWidth={3} />}
+                                    {mode === 'search' ? <Search size={20} strokeWidth={3} /> : mode === 'image' ? <Sparkles size={20} strokeWidth={3} /> : <ArrowRight size={20} strokeWidth={3} />}
                                 </button>
                             </div>
                         </div>
@@ -2716,6 +2832,25 @@ export default function App() {
             })}
         </nav>
       </div>
+
+      {/* Floating Lens Icon (Appears when video is playing and search bar is hidden) */}
+      <AnimatePresence>
+        {selectedVideo && activeTab === 'cinema' && !showVideoSearch && (
+          <motion.button
+            initial={{ opacity: 0, scale: 0, y: 50 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0, y: 50 }}
+            onClick={() => {
+              setShowVideoSearch(true);
+              triggerHaptic('light');
+            }}
+            className="fixed bottom-[104px] right-8 z-[100] w-14 h-14 bg-lumina-gradient rounded-full flex items-center justify-center shadow-2xl shadow-pink-500/40 border border-white/20 hover:scale-110 active:scale-95 transition-all"
+            aria-label="Show search"
+          >
+            <Search size={24} className="text-white" />
+          </motion.button>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {showHistory && (
