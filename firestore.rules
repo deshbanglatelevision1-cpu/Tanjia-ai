@@ -1,0 +1,125 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- Validation Blueprints ---
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'createdAt']) &&
+             data.keys().size() == 3 &&
+             data.uid == request.auth.uid &&
+             data.email is string && data.email.size() <= 256 &&
+             data.createdAt == request.time;
+    }
+
+    function isValidVideo(data) {
+      return data.keys().hasAll(['id', 'creatorId', 'url', 'type', 'title', 'stats', 'uploadedAt']) &&
+             data.id is string && data.id.size() <= 128 &&
+             data.creatorId == request.auth.uid &&
+             data.url is string && data.url.size() <= 1024 &&
+             data.type in ['short', 'long'] &&
+             data.title is string && data.title.size() <= 256 &&
+             data.stats.views is int &&
+             data.uploadedAt == request.time;
+    }
+
+    function isValidMessage(data) {
+      return data.keys().hasAll(['senderId', 'content', 'timestamp', 'isRead']) &&
+             data.senderId == request.auth.uid &&
+             data.content is string && data.content.size() <= 2000 &&
+             data.timestamp == request.time &&
+             data.isRead == false;
+    }
+
+    function isValidComment(data) {
+      return data.keys().hasAll(['userId', 'text', 'timestamp', 'likes']) &&
+             data.userId == request.auth.uid &&
+             data.text is string && data.text.size() <= 500 &&
+             data.timestamp == request.time &&
+             data.likes == 0;
+    }
+
+    // --- Match Blocks ---
+
+    // USERS
+    match /users/{userId} {
+      allow get: if isSignedIn();
+      allow list: if false; // No direct listing of users for privacy
+      allow create: if isOwner(userId) && isValidUser(incoming());
+      allow update: if isOwner(userId) && 
+                      incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoURL', 'subscribedTo', 'watchHistory']) &&
+                      incoming().uid == existing().uid; // Immutable UID
+    }
+
+    // VIDEOS
+    match /videos/{videoId} {
+      allow get: if true; // Publicly viewable
+      allow list: if true; // Publicly searchable
+      allow create: if isSignedIn() && isValidId(videoId) && isValidVideo(incoming());
+      allow update: if (
+        // Action: Record View (System/Function) or simple client inc
+        (incoming().diff(existing()).affectedKeys().hasOnly(['stats', 'metrics'])) ||
+        // Action: Metadata Edit (Creator)
+        (isOwner(existing().creatorId) && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'description', 'tags']))
+      ) && incoming().id == existing().id && incoming().creatorId == existing().creatorId;
+      allow delete: if isOwner(existing().creatorId);
+
+      // Comments Subcollection
+      match /comments/{commentId} {
+        allow list: if true;
+        allow create: if isSignedIn() && isValidId(commentId) && isValidComment(incoming());
+        allow update: if isSignedIn() && (
+          // Action: Edit text
+          (isOwner(existing().userId) && incoming().diff(existing()).affectedKeys().hasOnly(['text'])) ||
+          // Action: Like (any user)
+          (incoming().diff(existing()).affectedKeys().hasOnly(['likes']))
+        );
+        allow delete: if isOwner(existing().userId);
+      }
+    }
+
+    // CHATS & MESSAGES
+    match /chats/{chatId} {
+      // chatId is composed of participant UIDs
+      function isChatParticipant() {
+        return isSignedIn() && chatId.contains(request.auth.uid);
+      }
+
+      allow get: if isChatParticipant();
+      allow list: if isSignedIn() && chatId.contains(request.auth.uid);
+
+      match /messages/{msgId} {
+        allow list: if isChatParticipant();
+        allow create: if isChatParticipant() && isValidId(msgId) && isValidMessage(incoming());
+        allow update: if isChatParticipant() && incoming().diff(existing()).affectedKeys().hasOnly(['isRead']);
+      }
+    }
+  }
+}

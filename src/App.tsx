@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useRef, useEffect } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence, useScroll, useMotionValueEvent } from 'motion/react';
 import { 
   Search, Sparkles, Image as ImageIcon, X, ArrowRight, Loader2, 
   User, Bot, Command, Globe, ExternalLink, ChevronLeft, 
@@ -12,14 +12,20 @@ import {
   Plus, Home, Bell, History, Settings, MoreHorizontal, HelpCircle, MessageSquare,
   CloudRain, Zap, Music, PenTool, Layout, ThumbsUp, ThumbsDown,
   Volume2, VolumeX, Copy, Share2, Filter, SlidersHorizontal, Calendar, Download,
-  FileText, FileCode, Pencil
+  FileText, FileCode, Pencil, Clapperboard, Film, PlayCircle, Send, Heart, MessageCircle, Bookmark,
+  Activity, Mail, Users, CheckCircle
 } from 'lucide-react';
 import { chatWithGeminiStream, processImageWithGeminiStream, generateImageWithGemini } from './services/geminiService';
+import { CinemaSection, InboxSection } from './components/CinemaComponents';
 import { fetchSearchResults, SearchResult } from './services/searchService';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
   PieChart, Pie, Cell, LineChart, Line, AreaChart, Area
 } from 'recharts';
+
+import { auth, signInWithGoogle, db } from './lib/firebase';
+import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
+import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 
 type Mode = 'search' | 'ai';
 
@@ -33,6 +39,90 @@ interface Message {
   isStreaming?: boolean;
   feedback?: 'positive' | 'negative' | null;
 }
+
+type ContentType = 'short' | 'long';
+
+interface Video {
+  id: string;
+  creator: {
+    id: string;
+    name: string;
+    avatar: string;
+    isSubscribed?: boolean;
+  };
+  url: string;
+  thumbnail: string;
+  title: string;
+  description: string;
+  type: ContentType;
+  stats: {
+    views: string;
+    likes: string;
+    comments: string;
+  };
+  tags: string[];
+}
+
+const MOCK_VIDEOS: Video[] = [
+  {
+    id: 's1',
+    type: 'short',
+    creator: { id: 'u1', name: 'CyberTanjia', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Tanjia' },
+    url: 'https://assets.mixkit.co/videos/preview/mixkit-futuristic-urban-cityscape-at-night-40228-large.mp4',
+    thumbnail: 'https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=800',
+    title: 'Neon Dreams: The AI Future',
+    description: 'Exploring the neon-lit streets of the neural network.',
+    stats: { views: '1.2M', likes: '450K', comments: '12K' },
+    tags: ['ai', 'cyberpunk', 'future']
+  },
+  {
+    id: 's2',
+    type: 'short',
+    creator: { id: 'u2', name: 'NeuralCore', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Core' },
+    url: 'https://assets.mixkit.co/videos/preview/mixkit-bubbles-of-water-rising-in-slow-motion-42683-large.mp4',
+    thumbnail: 'https://images.unsplash.com/photo-1620641788421-7a1c342ea42e?w=800',
+    title: 'Abstract Synthesis',
+    description: 'When the AI starts dreaming of fluid dynamics.',
+    stats: { views: '890K', likes: '120K', comments: '5K' },
+    tags: ['abstract', 'fluid', 'ai-art']
+  },
+  {
+    id: 'l1',
+    type: 'long',
+    creator: { id: 'u1', name: 'CyberTanjia', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Tanjia' },
+    url: 'https://assets.mixkit.co/videos/preview/mixkit-winter-fashion-cold-outfit-430-large.mp4',
+    thumbnail: 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=800',
+    title: 'Full Length Documentary: The Era of Neural Cinema',
+    description: 'A deep dive into how generative AI is transforming the way we consume and create motion pictures. Featuring interviews with top architects.',
+    stats: { views: '2.5M', likes: '300K', comments: '25K' },
+    tags: ['documentary', 'cinema', 'tech-deep-dive']
+  }
+];
+
+const analyticsData = [
+  { name: 'Mon', value: 400 },
+  { name: 'Tue', value: 300 },
+  { name: 'Wed', value: 600 },
+  { name: 'Thu', value: 800 },
+  { name: 'Fri', value: 500 },
+  { name: 'Sat', value: 900 },
+  { name: 'Sun', value: 700 },
+];
+
+const SidebarButton = ({ icon: Icon, active, onClick, label }: any) => (
+  <button 
+    onClick={onClick}
+    className={`p-4 rounded-full transition-all relative group flex flex-col items-center gap-1 ${active ? 'text-white' : 'text-white/30 hover:text-white hover:bg-white/5'}`}
+    aria-label={label}
+  >
+    <div className={`p-3 rounded-2xl transition-all ${active ? 'bg-lumina-gradient shadow-lg shadow-lumina-blue/20' : ''}`}>
+        <Icon size={24} />
+    </div>
+    <span className="text-[8px] font-black uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap absolute -bottom-5">
+      {label}
+    </span>
+  </button>
+);
 
 /* Neural Background Component */
 const NeuralBackground = () => {
@@ -266,6 +356,28 @@ export default function App() {
   };
 
   useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (u) => {
+      setUser(u);
+      setAuthLoading(false);
+      if (u) {
+        // Sync profile to Firestore
+        const userRef = doc(db, 'users', u.uid);
+        const snap = await getDoc(userRef);
+        if (!snap.exists()) {
+          await setDoc(userRef, {
+            uid: u.uid,
+            email: u.email,
+            displayName: u.displayName,
+            photoURL: u.photoURL,
+            createdAt: serverTimestamp()
+          });
+        }
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
     scrollToBottom();
   }, [messages, isTyping, isSearching]);
 
@@ -313,7 +425,13 @@ export default function App() {
   };
   
   // Navigation State
-  const [activeTab, setActiveTab] = useState<'home' | 'search' | 'history' | 'notifications' | 'analytics'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'cinema' | 'inbox' | 'profile' | 'history' | 'notifications' | 'analytics' | 'search' | 'dashboard'>('home');
+  const [searchMode, setSearchMode] = useState<'results' | 'ai'>('results');
+  const [user, setUser] = useState<FirebaseUser | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [viewMode, setViewMode] = useState<'shorts' | 'long' | 'community'>('shorts');
+  const [activeVideoId, setActiveVideoId] = useState<string | null>(null);
+  const [showAIAssistant, setShowAIAssistant] = useState(false);
   const [historySearch, setHistorySearch] = useState('');
   const [activeUrl, setActiveUrl] = useState<string | null>(null);
   const [refineUsageCount, setRefineUsageCount] = useState(0);
@@ -329,6 +447,24 @@ export default function App() {
   const [editText, setEditText] = useState('');
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
   const recognitionRef = useRef<any>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  
+  const { scrollY } = useScroll({ container: scrollRef });
+  const [headerVisible, setHeaderVisible] = useState(true);
+  const lastScrollY = useRef(0);
+
+  useMotionValueEvent(scrollY, "change", (latest) => {
+    if (activeTab === 'cinema' && viewMode === 'shorts' && searchMode !== 'results') {
+      setHeaderVisible(true); // Keep header visible or manageable for shorts
+      return;
+    }
+    const diff = latest - lastScrollY.current;
+    if (Math.abs(diff) > 5) {
+      if (diff > 0 && latest > 100) setHeaderVisible(false);
+      else setHeaderVisible(true);
+    }
+    lastScrollY.current = latest;
+  });
 
   useEffect(() => {
     if (mode === 'search' && query.length > 1) {
@@ -547,7 +683,6 @@ export default function App() {
     return 'Isha';
   };
 
-  const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -571,6 +706,132 @@ export default function App() {
     if ('vibrate' in navigator) {
       const patterns = { light: [10], medium: [20], success: [10, 50, 10] };
       navigator.vibrate(patterns[type]);
+    }
+  };
+
+  const renderTabContent = () => {
+    switch (activeTab) {
+      case 'cinema':
+        return (
+          <CinemaSection 
+            viewMode={viewMode as any} 
+            setViewMode={setViewMode as any} 
+            videos={MOCK_VIDEOS} 
+            user={user}
+            searchMode={searchMode}
+            searchQuery={lastExecutedQuery}
+            onResetSearch={() => {
+              setSearchMode('ai');
+              setLastExecutedQuery('');
+              setMode('ai');
+            }}
+            onOpenAI={(v) => {
+              setActiveVideoId(v.id);
+              setShowAIAssistant(true);
+              setActiveTab('home');
+              setMode('ai');
+              setQuery(`Analyze this video: "${v.title}". Content: ${v.description}`);
+            }}
+          />
+        );
+      case 'inbox':
+        return <InboxSection user={user} />;
+      case 'profile':
+        if (!user) {
+          return (
+            <div className="flex flex-col items-center justify-center min-h-[60vh] text-center p-12">
+              <div className="w-24 h-24 rounded-full bg-white/5 flex items-center justify-center mb-8 border border-white/10">
+                <User size={48} className="text-white/20" />
+              </div>
+              <h2 className="text-3xl font-black text-white mb-4">Join the Ecosystem</h2>
+              <p className="text-white/40 max-w-sm mb-12">
+                Sign in with Google to unlock verified creator tools, high-fidelity long-form content, and neural communication.
+              </p>
+              <button 
+                onClick={signInWithGoogle}
+                className="bg-white text-black px-12 py-5 rounded-[32px] font-black uppercase tracking-widest text-xs hover:scale-105 active:scale-95 transition-all flex items-center gap-3"
+              >
+                Continue with Google
+                <ArrowRight size={16} />
+              </button>
+            </div>
+          );
+        }
+        return (
+          <div className="flex flex-col min-h-screen pb-40">
+            {/* Profile Header */}
+            <div className="relative h-64 rounded-[40px] overflow-hidden mb-20">
+               <div className="absolute inset-0 bg-lumina-gradient opacity-20" />
+               <div className="absolute inset-0 backdrop-blur-3xl" />
+               <div className="absolute -bottom-16 left-12 flex items-end gap-8">
+                  <div className="w-32 h-32 rounded-full border-4 border-black p-1 bg-lumina-blue shadow-2xl relative">
+                    <img src={user.photoURL || "https://api.dicebear.com/7.x/avataaars/svg?seed=Tanjia"} className="w-full h-full rounded-full bg-white/10" alt="" />
+                    <div className="absolute bottom-1 right-1 w-6 h-6 bg-blue-500 rounded-full border-4 border-black flex items-center justify-center">
+                       <CheckCircle size={12} className="text-white" fill="currentColor" />
+                    </div>
+                  </div>
+                  <div className="pb-4">
+                    <h2 className="text-4xl font-black text-white">{user.displayName || "Tanjia AI Cinema"}</h2>
+                    <p className="text-lumina-blue font-bold tracking-widest text-[10px] uppercase">@{user.email?.split('@')[0] || "neural_architect"}</p>
+                  </div>
+               </div>
+            </div>
+
+            {/* Stats Grid */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 px-4">
+               {[
+                 { label: 'Followers', value: '1.2M', icon: Users },
+                 { label: 'Total Views', value: '45.8M', icon: PlayCircle },
+                 { label: 'Engagement', value: '8.4%', icon: Activity },
+                 { label: 'Revenue', value: '$12,450', icon: Zap }
+               ].map(stat => (
+                 <div key={stat.label} className="glass p-6 rounded-[32px] border-white/5 group hover:border-lumina-blue/30 transition-all">
+                    <div className="flex justify-between items-start mb-4">
+                       <stat.icon size={20} className="text-white/20 group-hover:text-lumina-blue transition-colors" />
+                       <span className="text-[10px] font-black text-green-400">+12%</span>
+                    </div>
+                    <span className="block text-2xl font-black text-white">{stat.value}</span>
+                    <span className="text-[10px] text-white/30 uppercase tracking-widest font-black">{stat.label}</span>
+                 </div>
+               ))}
+            </div>
+
+            {/* Creator Tools */}
+            <div className="mt-12 px-4 space-y-8">
+               <h3 className="text-xl font-bold text-white px-2">Creator Insights</h3>
+               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="glass p-8 rounded-[40px] border-white/5">
+                     <h4 className="font-bold text-white mb-6">Audience Growth</h4>
+                     <div className="h-48 w-full">
+                        <ResponsiveContainer width="100%" height="100%">
+                           <AreaChart data={analyticsData}>
+                              <defs>
+                                 <linearGradient id="colorAudience" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="5%" stopColor="#00E5FF" stopOpacity={0.3}/>
+                                    <stop offset="95%" stopColor="#00E5FF" stopOpacity={0}/>
+                                 </linearGradient>
+                              </defs>
+                              <Area type="monotone" dataKey="value" stroke="#00E5FF" fillOpacity={1} fill="url(#colorAudience)" />
+                           </AreaChart>
+                        </ResponsiveContainer>
+                     </div>
+                  </div>
+                  <div className="glass p-8 rounded-[40px] border-white/5 flex flex-col justify-center">
+                     <h4 className="font-bold text-white mb-4">Content Optimization</h4>
+                     <p className="text-white/40 text-sm mb-8 leading-relaxed">
+                        Your latest video "Era of Neural Cinema" is performing 25% better than average. 
+                        AI suggests adding more "Technical" tags to boost discovery.
+                     </p>
+                     <button className="bg-lumina-gradient text-white font-bold py-4 rounded-2xl shadow-xl shadow-lumina-blue/20 hover:scale-[1.02] active:scale-95 transition-all">
+                        Generate AI Scripts
+                     </button>
+                  </div>
+               </div>
+            </div>
+          </div>
+        );
+      default:
+        return null;
     }
   };
 
@@ -706,21 +967,11 @@ export default function App() {
     if (mode === 'search') {
       setIsSearching(true);
       setHasSearched(true);
-      setActiveTab('search');
-      setMessages([]); // Clear previous overview
-      setFilters({ 
-        selectedSources: [], 
-        dateRange: 'all', 
-        fileType: 'all', 
-        exactMatch: false,
-        author: '',
-        keyword: '',
-        sortOrder: 'relevance',
-        aspectRatio: '1:1',
-        artStyle: 'none'
-      }); // Reset filters on new search
+      setActiveTab('cinema');
+      setSearchMode('results');
+      setSuggestions([]);
       
-      // Save query to history if not empty and not already the most recent one
+      // Save query to history
       if (activeQuery && activeQuery.trim()) {
         setSearchQueryHistory(prev => {
           const filtered = prev.filter(q => q && q.toLowerCase() !== activeQuery.toLowerCase());
@@ -1034,49 +1285,116 @@ export default function App() {
         <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-pink-600/20 blur-[120px] rounded-full animate-pulse" />
         <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-blue-600/20 blur-[120px] rounded-full animate-pulse" />
         <div className="absolute top-[20%] right-[10%] w-[30%] h-[30%] bg-violet-600/20 blur-[100px] rounded-full animate-pulse" />
-        <div className="blob blob-1"></div>
-        <div className="blob blob-2"></div>
-        <div className="blob blob-3"></div>
       </div>
 
-      {/* Top Bar Navigation */}
-      <header className="relative z-50 flex items-center justify-between px-6 py-4 backdrop-blur-md bg-black/10">
-        <button 
-          onClick={() => { setSideMenuOpen(true); triggerHaptic('light'); }}
-          className="p-2 hover:bg-white/10 rounded-full transition-colors"
-          aria-label="Open sidebar menu"
-        >
-          <Menu size={24} />
-        </button>
-        <div className="flex items-center gap-2">
-            {mode === 'search' ? (
-                <span className="text-3xl font-black tracking-tighter animate-magic-text leading-none">TANJIA</span>
-            ) : (
-                <div className="flex items-center gap-1.5 p-1 glass rounded-full pr-4">
+      {/* App Shell */}
+      <div className="flex flex-1 w-full relative z-10 overflow-hidden">
+        {/* Desktop Sidebar */}
+        <aside className="hidden md:flex flex-col items-center py-6 w-24 border-r border-white/5 bg-black/40 backdrop-blur-xl shrink-0">
+          <div className="mb-10">
+             <motion.div 
+               whileHover={{ rotate: 180 }}
+               className="w-12 h-12 rounded-2xl bg-lumina-gradient flex items-center justify-center shadow-lg shadow-lumina-blue/20 cursor-pointer"
+             >
+                <Film size={24} className="text-white" strokeWidth={3} />
+             </motion.div>
+          </div>
+          
+          <div className="flex-1 flex flex-col gap-4">
+            <SidebarButton icon={Home} active={activeTab === 'home' || activeTab === 'history' || activeTab === 'search' || activeTab === 'dashboard' || activeTab === 'analytics'} onClick={() => setActiveTab('home')} label="AI" />
+            <SidebarButton icon={Clapperboard} active={activeTab === 'cinema'} onClick={() => setActiveTab('cinema')} label="Cinema" />
+            <SidebarButton icon={MessageSquare} active={activeTab === 'inbox'} onClick={() => setActiveTab('inbox')} label="Inbox" />
+            <SidebarButton icon={Activity} active={activeTab === 'analytics' || activeTab === 'dashboard'} onClick={() => setActiveTab('analytics')} label="Stats" />
+            <SidebarButton icon={User} active={activeTab === 'profile'} onClick={() => setActiveTab('profile')} label={user ? user.displayName?.split(' ')[0] : "Profile"} />
+          </div>
+
+          <div className="mt-auto space-y-4">
+            <SidebarButton icon={Settings} active={false} onClick={() => {}} label="Settings" />
+            <div 
+              onClick={() => setActiveTab('profile')}
+              className="w-10 h-10 rounded-2xl border-2 border-white/10 overflow-hidden hover:border-lumina-blue/50 transition-all cursor-pointer shadow-xl bg-white/5"
+            >
+               {user ? (
+                 <img src={user.photoURL || ''} alt={user.displayName || ''} />
+               ) : (
+                 <div className="w-full h-full flex items-center justify-center">
+                   <User size={16} className="text-white/20" />
+                 </div>
+               )}
+            </div>
+          </div>
+        </aside>
+
+        {/* Main Interface Wrapper */}
+        <div className="flex-1 flex flex-col min-w-0 h-full relative">
+          
+          {/* Top Bar Navigation */}
+          <motion.header 
+            animate={{ y: headerVisible ? 0 : -80 }}
+            transition={{ duration: 0.3 }}
+            className={`fixed top-0 left-0 right-0 md:relative z-50 flex items-center justify-between px-6 py-4 backdrop-blur-md transition-all duration-300 ${activeTab === 'home' ? 'bg-black/10' : 'bg-black/40 border-b border-white/5'}`}
+          >
+            <button 
+              onClick={() => { setSideMenuOpen(true); triggerHaptic('light'); }}
+              className="md:hidden p-2 hover:bg-white/10 rounded-full transition-colors"
+              aria-label="Open sidebar menu"
+            >
+              <Menu size={24} />
+            </button>
+            <div className="flex items-center gap-2">
+                {activeTab !== 'home' ? (
+                  <div className="flex flex-col">
+                    <span className="text-sm font-black uppercase tracking-widest text-white leading-none">
+                      {activeTab === 'cinema' ? 'TANJIA CINEMA' : activeTab === 'inbox' ? 'NEURAL INBOX' : activeTab === 'profile' ? 'CREATOR HUB' : 'ANALYTICS'}
+                    </span>
+                    <span className="text-[8px] font-black uppercase tracking-[0.4em] text-lumina-blue opacity-60">
+                      Intelligence Version 4.0
+                    </span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5 p-1 glass rounded-full pr-4">
                     <div className="w-8 h-8 rounded-full bg-lumina-gradient flex items-center justify-center">
                         <Sparkles className="w-4 h-4 text-white" />
                     </div>
                     <span className="text-sm font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-pink-400 to-purple-400">TANJIA AI</span>
-                </div>
-            )}
-        </div>
-        <div className="flex items-center gap-4">
-          <div className="hidden sm:flex flex-col items-end opacity-40">
-            <span className="text-[9px] font-bold uppercase tracking-widest">{time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-            <span className="text-[8px] font-black uppercase text-blue-300">BD Standard Time</span>
-          </div>
-          <div className="w-10 h-10 rounded-full bg-lumina-gradient p-0.5 shadow-lg border border-white/20 cursor-pointer hover:scale-105 active:scale-95 transition-all">
-              <div className="w-full h-full bg-black rounded-full flex items-center justify-center">
-                  <User size={20} className="text-white/60" />
+                  </div>
+                )}
+            </div>
+            <div className="flex items-center gap-4">
+              <div className="hidden sm:flex flex-col items-end opacity-40 text-right">
+                <span className="text-[9px] font-bold uppercase tracking-widest block">{time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                <span className="text-[8px] font-black uppercase text-blue-300 block">BD Standard Time</span>
               </div>
-          </div>
-        </div>
-      </header>
+              {activeTab === 'home' && (
+                <div className="w-10 h-10 rounded-full bg-lumina-gradient p-0.5 shadow-lg border border-white/20 cursor-pointer hover:scale-105 active:scale-95 transition-all">
+                    <div className="w-full h-full bg-black rounded-full flex items-center justify-center">
+                        <User size={20} className="text-white/60" />
+                    </div>
+                </div>
+              )}
+            </div>
+          </motion.header>
 
-      {/* Main Content Area - Fully Scrollable */}
-      <main id="main-content" ref={scrollRef} className="relative z-10 flex-1 overflow-y-auto px-4 pt-6 scroll-smooth scrollbar-none">
-        <AnimatePresence mode="wait">
-          {activeTab === 'analytics' ? (
+          {/* Main Content Area - Fully Scrollable */}
+          <main id="main-content" ref={scrollRef} className="relative z-10 flex-1 overflow-y-auto px-4 md:px-0 scroll-smooth scrollbar-none custom-scrollbar">
+            <div className="max-w-7xl mx-auto h-full px-4 md:px-8">
+              <AnimatePresence mode="wait">
+                {activeTab === 'cinema' && (
+                  <motion.div key="cinema" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="h-full pt-8 pb-32">
+                    {renderTabContent()}
+                  </motion.div>
+                )}
+                {activeTab === 'inbox' && (
+                  <motion.div key="inbox" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="h-full pt-8 pb-32">
+                    {renderTabContent()}
+                  </motion.div>
+                )}
+                {activeTab === 'profile' && (
+                  <motion.div key="profile" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="h-full pt-8 pb-32">
+                    {renderTabContent()}
+                  </motion.div>
+                )}
+                {(activeTab === 'analytics' || activeTab === 'dashboard') && (
             <motion.div 
               key="analytics-tab"
               initial={{ opacity: 0, y: 20 }}
@@ -1181,7 +1499,8 @@ export default function App() {
                 </div>
               </div>
             </motion.div>
-          ) : activeTab === 'history' ? (
+          )}
+          {activeTab === 'history' && (
             <motion.div 
               key="history-tab"
               initial={{ opacity: 0, scale: 0.95 }}
@@ -1264,7 +1583,8 @@ export default function App() {
 
               <div className="h-48 invisible" />
             </motion.div>
-          ) : mode === 'search' ? (
+          )}
+          {activeTab === 'home' && mode === 'search' && (
             <motion.div 
               key="search-mode"
               initial={{ opacity: 0, x: -20 }}
@@ -1891,7 +2211,8 @@ export default function App() {
                 </div>
               )}
             </motion.div>
-          ) : (
+          )}
+          {activeTab === 'home' && mode === 'ai' && (
             /* AI Mode View */
             <motion.div 
               key="ai-mode"
@@ -2256,345 +2577,86 @@ export default function App() {
             </motion.div>
           )}
         </AnimatePresence>
-      </main>
+      </div>
+    </main>
 
-      {/* Floating Bottom Navigation / Input - INTEGRATED VIEW */}
-      <footer className="relative z-50 px-4 pb-4 pt-2 flex flex-col items-center bg-black/95 backdrop-blur-3xl border-t border-white/5">
-        
-        <div className="w-full max-w-xl flex flex-col gap-3">
-            {/* Integrated Header Controls */}
-            <div className="flex items-center justify-between px-2">
-                <div className="flex items-center gap-1 p-1 glass rounded-full border-white/10 scale-90 -ml-2">
-                    <button 
-                        onClick={() => { setMode('ai'); triggerHaptic('light'); }}
-                        className={`px-3 py-1.5 rounded-full text-[8px] font-black uppercase tracking-widest transition-all duration-300 ${mode === 'ai' ? 'bg-lumina-gradient text-white shadow-xl' : 'text-white/20 hover:text-white/40'}`}
-                        aria-pressed={mode === 'ai'}
-                    >
-                        AI Neural
-                    </button>
-                    <button 
-                        onClick={() => { setMode('search'); triggerHaptic('light'); }}
-                        className={`px-3 py-1.5 rounded-full text-[8px] font-black uppercase tracking-widest transition-all duration-300 ${mode === 'search' ? 'bg-white/10 text-white shadow-xl' : 'text-white/20 hover:text-white/40'}`}
-                        aria-pressed={mode === 'search'}
-                    >
-                        Search
-                    </button>
-                </div>
-
-                <div className="flex items-center gap-1 p-1 glass rounded-full border-white/10 scale-90 -mr-2">
-                    <button 
-                      onClick={() => setThinkingMode('fast')}
-                      className={`px-3 py-1.5 rounded-full text-[8px] font-black uppercase tracking-widest transition-all ${thinkingMode === 'fast' ? 'bg-white/10 text-white shadow-xl' : 'text-white/20 hover:text-white/40'}`}
-                      aria-label="Switch to Fast thinking mode"
-                      aria-pressed={thinkingMode === 'fast'}
-                    >
-                      Fast
-                    </button>
-                    <button 
-                      onClick={() => setThinkingMode('pro')}
-                      className={`px-3 py-1.5 rounded-full text-[8px] font-black uppercase tracking-widest transition-all ${thinkingMode === 'pro' ? 'bg-lumina-blue text-white shadow-xl' : 'text-white/20 hover:text-white/40'}`}
-                      aria-label="Switch to Pro thinking mode"
-                      aria-pressed={thinkingMode === 'pro'}
-                    >
-                      Pro
-                    </button>
-                    <button 
-                      onClick={() => setThinkingMode('think')}
-                      className={`px-3 py-1.5 rounded-full text-[8px] font-black uppercase tracking-widest transition-all ${thinkingMode === 'think' ? 'bg-pink-500/20 text-pink-300 shadow-xl border border-pink-500/30' : 'text-white/20 hover:text-white/40'}`}
-                      aria-label="Switch to Deep Think mode"
-                      aria-pressed={thinkingMode === 'think'}
-                    >
-                      Think
-                    </button>
-                </div>
-
-                <div className="flex items-center gap-1 p-1 glass rounded-full border-white/10 scale-90 -mr-2">
-                    <button 
-                      onClick={() => { setIsAutoSpeak(!isAutoSpeak); triggerHaptic('light'); }}
-                      className={`px-3 py-1.5 rounded-full text-[8px] font-black uppercase tracking-widest transition-all flex items-center gap-1.5 ${isAutoSpeak ? 'bg-blue-500/20 text-blue-300 shadow-xl border border-blue-500/30' : 'text-white/20 hover:text-white/40'}`}
-                      aria-label={isAutoSpeak ? "Disable auto speak" : "Enable auto speak"}
-                      aria-pressed={isAutoSpeak}
-                    >
-                      <Volume2 size={10} />
-                      {isAutoSpeak ? 'Voice On' : 'Voice Off'}
-                    </button>
-                    <button 
-                      onClick={() => { isListening ? stopListening() : startListening(); triggerHaptic('light'); }}
-                      className={`px-3 py-1.5 rounded-full text-[8px] font-black uppercase tracking-widest transition-all flex items-center gap-1.5 ${isListening ? 'bg-pink-500/20 text-pink-300 shadow-xl border border-pink-500/30' : 'text-white/20 hover:text-white/40'}`}
-                      aria-label={isListening ? "Stop microphone" : "Start microphone"}
-                      aria-pressed={isListening}
-                    >
-                      <Mic size={10} />
-                      {isListening ? 'Mic On' : 'Mic Off'}
-                    </button>
-                </div>
-            </div>
-
-            {/* Input Area */}
-            <div className="relative group w-full">
-                <AnimatePresence mode="popLayout">
-                    {selectedImage && (
-                        <motion.div 
-                            initial={{ opacity: 0, y: 5 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, scale: 0.95 }}
-                            className="absolute -top-12 left-0 right-0 glass px-3 py-1.5 rounded-xl h-10 flex items-center gap-2 border-white/20 mx-2"
+      {/* Floating Bottom Input Area - ANIMATED */}
+      <AnimatePresence>
+        {(activeTab === 'search' || mode === 'ai') && (
+          <motion.div 
+            initial={{ y: 200, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 200, opacity: 0 }}
+            transition={{ type: 'spring', damping: 30, stiffness: 300 }}
+            className="fixed bottom-[100px] left-0 right-0 z-[55] px-4 flex flex-col items-center pointer-events-none"
+          >
+            <div className="w-full max-w-xl flex flex-col gap-3 pointer-events-auto">
+                <div className="flex items-center justify-between px-2">
+                    <div className="flex items-center gap-1 p-1 glass rounded-full border-white/10 scale-90 -ml-2">
+                        <button 
+                            onClick={() => { setMode('ai'); triggerHaptic('light'); }}
+                            className={`px-3 py-1.5 rounded-full text-[8px] font-black uppercase tracking-widest transition-all duration-300 ${mode === 'ai' ? 'bg-lumina-gradient text-white shadow-xl' : 'text-white/20 hover:text-white/40'}`}
                         >
-                            <div className="w-6 h-6 rounded-md overflow-hidden border border-white/10">
-                                <img src={selectedImage.data} className="w-full h-full object-cover" alt="Thumb" />
-                            </div>
-                            <span className="text-[8px] font-black opacity-60 uppercase tracking-[0.2em] text-lumina-blue">
-                                {mode === 'search' ? 'Visual Search Active' : 'Neural Component Linked'}
-                            </span>
-                            <button onClick={() => setSelectedImage(null)} className="p-1 hover:bg-white/10 rounded-full ml-auto">
-                                <X size={12} />
+                            AI Neural
+                        </button>
+                        <button 
+                            onClick={() => { setMode('search'); triggerHaptic('light'); }}
+                            className={`px-3 py-1.5 rounded-full text-[8px] font-black uppercase tracking-widest transition-all duration-300 ${mode === 'search' ? 'bg-white/10 text-white shadow-xl' : 'text-white/20 hover:text-white/40'}`}
+                        >
+                            Search
+                        </button>
+                    </div>
+
+                    <div className="flex items-center gap-1 p-1 glass rounded-full border-white/10 scale-90 -mr-2">
+                        <button 
+                          onClick={() => setThinkingMode('fast')}
+                          className={`px-3 py-1.5 rounded-full text-[8px] font-black uppercase tracking-widest transition-all ${thinkingMode === 'fast' ? 'bg-white/10 text-white shadow-xl' : 'text-white/20 hover:text-white/40'}`}
+                        >
+                          Fast
+                        </button>
+                        <button 
+                          onClick={() => setThinkingMode('think')}
+                          className={`px-3 py-1.5 rounded-full text-[8px] font-black uppercase tracking-widest transition-all ${thinkingMode === 'think' ? 'bg-pink-500/20 text-pink-300 shadow-xl border border-pink-500/30' : 'text-white/20 hover:text-white/40'}`}
+                        >
+                          Think
+                        </button>
+                    </div>
+                </div>
+
+                <div className="relative group w-full">
+                    <div className="relative p-[1.5px] rounded-[24px] bg-gradient-to-r from-pink-500 via-blue-500 to-violet-500 shadow-2xl group-focus-within:shadow-pink-500/20 transition-all duration-500">
+                        <div className="relative glass-dark rounded-[23px] flex items-center px-2 py-1.5 min-h-[64px] backdrop-blur-3xl transition-all">
+                            <button 
+                                onClick={() => { fileInputRef.current?.click(); triggerHaptic('light'); }} 
+                                className="p-3 hover:bg-white/10 rounded-xl transition-all text-white/30 hover:text-white"
+                            >
+                                <ImageIcon size={ 20 } />
                             </button>
-                        </motion.div>
-                    )}
+                            
+                            <input 
+                                type="text" 
+                                value={query}
+                                onChange={(e) => setQuery(e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+                                placeholder={mode === 'search' ? "Explore neural cinema..." : "Ask TANJIA AI anything..."}
+                                className="flex-1 bg-transparent border-none outline-none text-sm px-4 font-medium text-white placeholder:text-white/20 w-0"
+                            />
 
-                    {mode === 'ai' && showGenSettings && (
-                        <motion.div 
-                            initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                            animate={{ opacity: 1, y: 0, scale: 1 }}
-                            exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                            className="absolute bottom-full mb-4 left-0 right-0 glass-dark p-4 rounded-3xl border-white/10 shadow-2xl backdrop-blur-3xl mx-2 z-50"
-                        >
-                            <div className="flex items-center justify-between mb-4 px-1">
-                                <div className="flex items-center gap-2">
-                                    <Sparkles size={14} className="text-lumina-blue" />
-                                    <span className="text-[10px] font-black uppercase tracking-[0.2em] text-white">Generation Engine Tuning</span>
-                                </div>
-                                <button onClick={() => setShowGenSettings(false)} className="p-1 hover:bg-white/10 rounded-full">
-                                    <X size={14} />
+                            <div className="flex items-center gap-2 pr-2">
+                                <button 
+                                    onClick={isListening ? stopListening : startListening}
+                                    className={`p-3 rounded-xl transition-all ${isListening ? 'text-pink-400 bg-pink-400/10 animate-pulse outline outline-1 outline-pink-500/30' : 'text-white/20 hover:bg-white/10'}`}
+                                >
+                                    <Mic size={22} />
+                                </button>
+                                <button 
+                                    onClick={() => handleSend()} 
+                                    className="p-3.5 bg-lumina-gradient text-white rounded-2xl hover:brightness-110 active:scale-95 transition-all shadow-xl shadow-pink-500/20 flex-shrink-0"
+                                >
+                                    {mode === 'search' ? <Search size={20} strokeWidth={3} /> : <ArrowRight size={20} strokeWidth={3} />}
                                 </button>
                             </div>
-
-                            <div className="space-y-4">
-                                <div>
-                                    <span className="text-[8px] font-black uppercase tracking-[0.2em] text-white/30 mb-2 block">Aspect Ratio</span>
-                                    <div className="flex gap-2">
-                                        {(['1:1', '16:9', '9:16'] as const).map(ratio => (
-                                            <button 
-                                                key={ratio}
-                                                onClick={() => { setFilters(prev => ({ ...prev, aspectRatio: ratio })); triggerHaptic('light'); }}
-                                                className={`flex-1 py-2 rounded-xl text-[10px] font-bold transition-all border ${filters.aspectRatio === ratio ? 'bg-lumina-blue/20 text-white border-lumina-blue/40' : 'bg-white/5 text-white/40 border-transparent hover:border-white/10'}`}
-                                            >
-                                                {ratio}
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-
-                                <div>
-                                    <span className="text-[8px] font-black uppercase tracking-[0.2em] text-white/30 mb-2 block">Visual Style</span>
-                                    <div className="grid grid-cols-3 md:grid-cols-5 gap-2">
-                                        {(['none', 'photorealistic', 'sketch', 'oil-painting', 'abstract', 'cartoon', 'pixel-art', '3d-render', 'cyberpunk', 'steampunk'] as const).map(style => (
-                                            <button 
-                                                key={style}
-                                                onClick={() => { setFilters(prev => ({ ...prev, artStyle: style })); triggerHaptic('light'); }}
-                                                className={`py-2 rounded-xl text-[9px] font-bold uppercase tracking-widest transition-all border ${filters.artStyle === style ? 'bg-lumina-blue/20 text-white border-lumina-blue/40 shadow-[0_0_10px_rgba(30,144,255,0.3)]' : 'bg-white/5 text-white/40 border-transparent hover:border-white/10'}`}
-                                            >
-                                                {style.split('-').join(' ')}
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-
-                                <div>
-                                    <span className="text-[8px] font-black uppercase tracking-[0.2em] text-white/30 mb-2 block">Neural Features</span>
-                                    <button 
-                                        onClick={() => { setIsAutoSpeak(!isAutoSpeak); triggerHaptic('light'); }}
-                                        className={`w-full py-2.5 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all border flex items-center justify-center gap-2 ${isAutoSpeak ? 'bg-lumina-pink/20 text-white border-lumina-pink/40' : 'bg-white/5 text-white/40 border-transparent hover:border-white/10'}`}
-                                    >
-                                        {isAutoSpeak ? <Volume2 size={12} className="animate-pulse" /> : <VolumeX size={12} />}
-                                        {isAutoSpeak ? 'Auto-Speech Active' : 'Auto-Speech Muted'}
-                                    </button>
-                                </div>
-
-                                {imagePromptHistory.length > 0 && (
-                                    <div className="pt-4 border-t border-white/5">
-                                        <span className="text-[8px] font-black uppercase tracking-[0.2em] text-white/30 mb-3 block">Past Prompts</span>
-                                        <div className="flex flex-col gap-2 max-h-[120px] overflow-y-auto pr-2 custom-scrollbar">
-                                            {imagePromptHistory.map((prompt, idx) => (
-                                                <button 
-                                                    key={idx}
-                                                    onClick={() => { setQuery(prompt); triggerHaptic('light'); }}
-                                                    className="text-left p-3 rounded-xl bg-white/5 hover:bg-white/10 transition-all group/pitem border border-transparent hover:border-white/10"
-                                                >
-                                                    <p className="text-[10px] text-white/60 group-hover/pitem:text-white line-clamp-2 leading-relaxed italic">
-                                                        "{prompt}"
-                                                    </p>
-                                                </button>
-                                            ))}
-                                        </div>
-                                    </div>
-                                )}
-
-                                <div className="pt-4 border-t border-white/5">
-                                    <span className="text-[8px] font-black uppercase tracking-[0.2em] text-white/30 mb-3 block">Inspiration Presets</span>
-                                    <div className="grid grid-cols-2 gap-2">
-                                        {[
-                                            { label: "Neon Samurai", prompt: "/image a futuristic samurai in a neon-drenched cyberpunk alleyway, 8k, cinematic lighting" },
-                                            { label: "Floating Isles", prompt: "/image ethereal floating islands with waterfalls cascading into clouds, dreamlike fantasy art" },
-                                            { label: "Glass Tech", prompt: "/image minimalist architectural design of a glass laboratory in a snowy forest, sharp focus" },
-                                            { label: "Organic Core", prompt: "/image abstract macro photography of iridescent bioluminescent organisms, glowing details" }
-                                        ].map((preset, idx) => (
-                                            <button 
-                                                key={idx}
-                                                onClick={() => { setQuery(preset.prompt); triggerHaptic('medium'); }}
-                                                className="flex flex-col gap-1 p-2 rounded-xl bg-lumina-blue/5 hover:bg-lumina-blue/10 border border-white/5 hover:border-lumina-blue/20 transition-all text-left"
-                                            >
-                                                <span className="text-[10px] font-bold text-white/80">{preset.label}</span>
-                                                <span className="text-[8px] text-white/20 line-clamp-1 italic">Preset Config</span>
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-                            </div>
-                        </motion.div>
-                    )}
-                </AnimatePresence>
-
-                {mode === 'search' && suggestions.length > 0 && (
-                    <motion.div 
-                        initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                        animate={{ opacity: 1, y: 0, scale: 1 }}
-                        exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                        className="absolute bottom-full mb-3 left-0 right-0 glass-dark p-2 rounded-2xl border-white/10 shadow-2xl backdrop-blur-3xl mx-2 z-50 flex flex-wrap gap-1.5"
-                    >
-                        <div className="w-full flex items-center justify-between mb-1.5 px-2">
-                             <div className="flex items-center gap-1.5">
-                                <Sparkles size={10} className="text-lumina-blue" />
-                                <span className="text-[8px] font-black uppercase tracking-[0.2em] text-white/40 leading-none">AI Suggestions</span>
-                             </div>
-                             <button onClick={() => setSuggestions([])} className="p-0.5 hover:bg-white/10 rounded-full">
-                                <X size={10} className="text-white/20" />
-                             </button>
                         </div>
-                        {suggestions.map((suggestion, idx) => (
-                            <button 
-                                key={idx}
-                                onClick={() => { setQuery(suggestion); setSuggestions([]); handleSend(); triggerHaptic('light'); }}
-                                className="px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 hover:border-white/10 transition-all text-xs text-white/70 hover:text-white flex items-center gap-2 group/sug animate-in fade-in slide-in-from-bottom-1 duration-300 fill-mode-both"
-                                style={{ animationDelay: `${idx * 50}ms` }}
-                            >
-                                <span className="flex-1 text-left">{suggestion}</span>
-                                <ArrowRight size={10} className="opacity-0 group-hover/sug:opacity-100 transition-opacity text-lumina-blue" />
-                            </button>
-                        ))}
-                    </motion.div>
-                )}
-
-                {mode === 'ai' && (query.toLowerCase().startsWith('/image') || query.toLowerCase().includes('generate an image') || query.toLowerCase().includes('create an image')) && (
-                    <motion.div 
-                        initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                        animate={{ opacity: 1, y: 0, scale: 1 }}
-                        exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                        className="absolute bottom-full mb-3 left-0 right-0 glass-dark p-3 rounded-2xl border-white/10 shadow-2xl backdrop-blur-3xl mx-2 z-50 flex flex-col gap-3"
-                    >
-                        <div className="space-y-2">
-                             <div className="flex items-center justify-between px-1">
-                                <div className="flex items-center gap-1.5">
-                                    <Layout size={10} className="text-lumina-blue" />
-                                    <span className="text-[8px] font-black uppercase tracking-[0.2em] text-white/40 leading-none">Aspect Ratio</span>
-                                </div>
-                                <span className="text-[10px] font-bold text-lumina-blue/80">{filters.aspectRatio}</span>
-                            </div>
-                            <div className="flex gap-1.5 p-1 bg-white/5 rounded-xl">
-                                {(['1:1', '16:9', '9:16'] as const).map(ratio => (
-                                    <button 
-                                        key={ratio}
-                                        onClick={() => { setFilters(prev => ({ ...prev, aspectRatio: ratio })); triggerHaptic('light'); }}
-                                        className={`flex-1 py-2 rounded-lg text-[10px] font-black tracking-widest transition-all border ${filters.aspectRatio === ratio ? 'bg-lumina-blue/20 text-white border-lumina-blue/40 shadow-[0_0_15px_rgba(30,144,255,0.2)]' : 'text-white/30 border-transparent hover:bg-white/5 hover:text-white/60'}`}
-                                    >
-                                        {ratio}
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
-
-                         <div className="space-y-2">
-                             <div className="flex items-center justify-between px-1">
-                                <div className="flex items-center gap-1.5">
-                                    <PenTool size={10} className="text-lumina-pink" />
-                                    <span className="text-[8px] font-black uppercase tracking-[0.2em] text-white/40 leading-none">Art Style</span>
-                                </div>
-                                <span className="text-[10px] font-bold text-lumina-pink/80 uppercase">{filters.artStyle}</span>
-                            </div>
-                            <div className="grid grid-cols-5 gap-1.5 p-1 bg-white/5 rounded-xl">
-                                {(['none', 'photorealistic', 'sketch', 'oil-painting', 'abstract', 'cartoon', 'pixel-art', '3d-render', 'cyberpunk', 'steampunk'] as const).map(style => (
-                                    <button 
-                                        key={style}
-                                        onClick={() => { setFilters(prev => ({ ...prev, artStyle: style })); triggerHaptic('light'); }}
-                                        className={`py-2 rounded-lg text-[8px] font-black tracking-tighter transition-all border uppercase ${filters.artStyle === style ? 'bg-lumina-pink/20 text-white border-lumina-pink/40 shadow-[0_0_15px_rgba(255,105,180,0.2)]' : 'text-white/30 border-transparent hover:bg-white/5 hover:text-white/60'}`}
-                                        title={style}
-                                    >
-                                        {style === 'none' ? 'Def' : 
-                                         style === 'photorealistic' ? 'Real' : 
-                                         style === 'sketch' ? 'Skch' :
-                                         style === 'oil-painting' ? 'Oil' :
-                                         style === 'abstract' ? 'Abs' : 
-                                         style === 'cartoon' ? 'Toon' : 
-                                         style === 'pixel-art' ? 'Pix' :
-                                         style === '3d-render' ? '3D' :
-                                         style === 'cyberpunk' ? 'Cyber' : 'Steam'}
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
-                    </motion.div>
-                )}
-
-                <div className="relative glass-dark rounded-[24px] border-white/10 flex items-center px-2 py-1.5 min-h-[54px] shadow-2xl backdrop-blur-3xl group-focus-within:border-white/20 transition-all">
-                    <button 
-                        onClick={() => { fileInputRef.current?.click(); triggerHaptic('light'); }} 
-                        className="p-2.5 hover:bg-white/10 rounded-xl transition-all text-white/30 hover:text-white group/upload"
-                        title="Upload Image"
-                        aria-label="Upload an image to TANJIA AI"
-                    >
-                        <ImageIcon size={ 18 } className="group-hover/upload:scale-110 transition-transform" />
-                    </button>
-
-                    {mode === 'ai' && (
-                        <button 
-                            onClick={() => { setShowGenSettings(!showGenSettings); triggerHaptic('light'); }} 
-                            className={`p-2.5 rounded-xl transition-all ${showGenSettings ? 'text-lumina-blue bg-lumina-blue/10' : 'text-white/30 hover:text-white hover:bg-white/10'} group/tune`}
-                            title="Generation Settings"
-                        >
-                            {(query.toLowerCase().startsWith('/image') || query.toLowerCase().includes('generate an image') || query.toLowerCase().includes('create an image')) ? (
-                                <motion.div animate={{ scale: [1, 1.2, 1] }} transition={{ duration: 2, repeat: Infinity }}>
-                                    <ImageIcon size={ 18 } className="text-lumina-blue" />
-                                </motion.div>
-                            ) : (
-                                <SlidersHorizontal size={ 18 } className="group-hover/tune:rotate-90 transition-transform duration-500" />
-                            )}
-                        </button>
-                    )}
-                    
-                    <input 
-                        type="text" 
-                        value={query}
-                        onChange={(e) => setQuery(e.target.value)}
-                        onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-                        placeholder={mode === 'search' ? "Explore anything..." : "Message TANJIA AI..."}
-                        className="flex-1 bg-transparent border-none outline-none text-sm px-3 font-medium text-white placeholder:text-white/10 w-0"
-                        aria-label={mode === 'search' ? "Search anything" : "AI message input"}
-                    />
-
-                    <div className="flex items-center gap-1 pr-1">
-                        <button 
-                            onClick={startListening}
-                            className={`p-2.5 rounded-xl transition-all ${isListening ? 'text-pink-400 bg-pink-400/10 animate-pulse' : 'text-white/20 hover:bg-white/10'}`}
-                        >
-                            <Mic size={20} />
-                        </button>
-                        <button 
-                            onClick={() => handleSend()} 
-                            className="p-3 bg-lumina-gradient text-white rounded-2xl hover:brightness-110 active:scale-95 transition-all shadow-lg flex-shrink-0"
-                            aria-label={mode === 'search' ? "Search" : "Send message"}
-                        >
-                            {mode === 'search' ? <Search size={18} strokeWidth={3} /> : <ArrowRight size={18} strokeWidth={3} />}
-                        </button>
                     </div>
                 </div>
 
@@ -2602,82 +2664,54 @@ export default function App() {
                     <motion.div 
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
-                        className="flex flex-wrap items-center justify-center gap-2 mt-4"
+                        className="flex flex-wrap items-center justify-center gap-2 mt-2"
                     >
-                        {[
-                            'Cyberpunk city in 2077',
-                            'Astronaut in a library',
-                            'Surrealist clock melting',
-                            'Isometric 3D icon set'
-                        ].map((suggestion) => (
+                        {['Cyberpunk world', 'AI Trends', 'Neural nodes', 'Future of UI'].map((s) => (
                             <button
-                                key={suggestion}
-                                onClick={() => { setQuery(suggestion); triggerHaptic('light'); }}
-                                className="px-3 py-1.5 glass rounded-full text-[9px] font-black uppercase tracking-widest text-white/40 hover:text-white hover:bg-white/10 hover:border-white/20 transition-all border border-white/5 active:scale-95"
+                                key={s}
+                                onClick={() => { setQuery(s); triggerHaptic('light'); }}
+                                className="px-4 py-2 glass rounded-full text-[9px] font-black uppercase tracking-widest text-white/40 hover:text-white transition-all border border-white/5 active:scale-95"
                             >
-                                {suggestion}
+                                {s}
                             </button>
                         ))}
                     </motion.div>
                 )}
-
-                {mode === 'ai' && messages.length === 0 && (
-                    <motion.div 
-                        initial={{ opacity: 0, scale: 0.9 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        className="mt-8 flex justify-center"
-                    >
-                        <button 
-                            onClick={() => triggerConfirmSearch('Generate an image of a futuristic cityscape')}
-                            className="group relative px-8 py-4 glass rounded-[32px] border-lumina-blue/30 bg-lumina-blue/5 flex items-center gap-4 hover:bg-lumina-blue/10 hover:border-lumina-blue/50 transition-all shadow-[0_0_40px_rgba(30,144,255,0.1)] active:scale-95"
-                        >
-                            <div className="w-12 h-12 rounded-2xl bg-lumina-blue/20 flex items-center justify-center text-lumina-blue group-hover:scale-110 transition-transform">
-                                <Sparkles size={24} />
-                            </div>
-                            <div className="text-left">
-                                <span className="text-[10px] font-black uppercase tracking-[0.3em] text-lumina-blue/60 block mb-1">Featured Generation</span>
-                                <span className="text-sm font-bold text-white group-hover:text-lumina-blue transition-colors">Futuristic Cityscape</span>
-                            </div>
-                            <ArrowRight size={18} className="ml-4 text-lumina-blue/40 group-hover:text-lumina-blue transform group-hover:translate-x-2 transition-all" />
-                        </button>
-                    </motion.div>
-                )}
             </div>
-        </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-        {/* Global Bottom Navigation Bar - COMPACT */}
-        <nav className="w-full max-w-[300px] h-10 glass rounded-full flex items-center justify-around px-2 border-white/5 shadow-2xl relative overflow-hidden mt-4 mb-2">
+      {/* FIXED ROOT BOTTOM NAVIGATION - Always Visible */}
+      <div className="fixed bottom-0 left-0 right-0 z-[60] flex flex-col items-center pointer-events-none pb-[env(safe-area-inset-bottom,16px)] mb-4">
+        <nav className="w-full max-w-sm h-16 glass-dark rounded-full flex items-center justify-around px-4 border border-white/10 shadow-2xl backdrop-blur-3xl pointer-events-auto">
             {[
-                { id: 'search', icon: Home, label: 'Home' },
-                { id: 'ai', icon: Zap, label: 'Neural' },
-                { id: 'history', icon: History, label: 'Threads' },
-                { id: 'analytics', icon: Monitor, label: 'Insights' }
-            ].map(tab => (
-                <button 
-                    key={tab.id}
-                    onClick={() => { 
-                      if (tab.id === 'history' || tab.id === 'analytics') {
-                        setActiveTab(tab.id as any);
-                        setShowGenSettings(false);
-                      } else {
-                        setActiveTab('home');
-                        setMode(tab.id as any);
-                        if (tab.id !== 'ai') setShowGenSettings(false);
-                      }
-                      triggerHaptic('light'); 
-                    }}
-                    aria-label={`Navigate to ${tab.label}`}
-                    aria-current={(tab.id === activeTab) || (tab.id === 'search' && activeTab === 'home' && mode === 'search') || (tab.id === 'ai' && activeTab === 'home' && mode === 'ai') ? 'page' : undefined}
-                    className={`flex items-center gap-1.5 transition-all duration-300 px-3 py-1.5 rounded-full ${ (tab.id === activeTab) || (tab.id === 'search' && activeTab === 'home' && mode === 'search') || (tab.id === 'ai' && activeTab === 'home' && mode === 'ai') ? 'text-white bg-white/5' : 'text-white/20 hover:text-white/40'}`}
-                >
-                    <tab.icon size={14} strokeWidth={2.5} />
-                    <span className="text-[7px] font-black uppercase tracking-widest">{tab.label}</span>
-                </button>
-            ))}
+                { id: 'cinema', icon: Film, label: 'Cinema' },
+                { id: 'search', icon: Search, label: 'Search' },
+                { id: 'home', icon: Bot, label: 'AI Hub' },
+                { id: 'inbox', icon: Mail, label: 'Inbox' },
+                { id: 'profile', icon: User, label: 'Profile' }
+            ].map(tab => {
+                const isActive = activeTab === tab.id || (tab.id === 'home' && ['history', 'analytics'].includes(activeTab as string));
+                return (
+                    <button 
+                        key={tab.id}
+                        onClick={() => { 
+                          setActiveTab(tab.id as any);
+                          if (tab.id === 'search') setMode('search');
+                          triggerHaptic('light');
+                        }}
+                        className={`flex flex-col items-center justify-center gap-1 transition-all relative px-3 py-1 rounded-2xl ${isActive ? 'text-lumina-blue bg-white/5 shadow-inner' : 'text-white/20 hover:text-white/40'}`}
+                    >
+                        <tab.icon size={isActive ? 22 : 20} strokeWidth={isActive ? 2.5 : 2} className="transition-all" />
+                        <span className={`text-[8px] font-black uppercase tracking-tighter transition-all ${isActive ? 'opacity-100' : 'opacity-0 h-0 w-0 overflow-hidden'}`}>{tab.label}</span>
+                        {isActive && <motion.div layoutId="footer-tab" className="absolute -bottom-1 w-1 h-1 bg-lumina-blue rounded-full shadow-[0_0_8px_rgba(30,144,255,0.6)]" />}
+                    </button>
+                );
+            })}
         </nav>
-      </footer>
+      </div>
 
-      {/* History Modal Overlay */}
       <AnimatePresence>
         {showHistory && (
           <motion.div 
@@ -2718,11 +2752,37 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* Hidden Inputs and Overlays */}
-      <input type="file" ref={fileInputRef} onChange={handleImageUpload} accept="image/*" className="hidden" />
-      
-      <AnimatePresence>
-        {activeUrl && (
+        {/* Hidden Inputs and Overlays */}
+        <input type="file" ref={fileInputRef} onChange={handleImageUpload} accept="image/*" className="hidden" />
+      </div> {/* Closing Main Interface Wrapper */}
+    </div> {/* Closing App Shell */}
+
+    {/* Floating AI Assistant Bubble */}
+    <AnimatePresence>
+      {activeTab === 'cinema' && (
+        <motion.button
+          initial={{ scale: 0, y: 100 }}
+          animate={{ scale: 1, y: 0 }}
+          exit={{ scale: 0, y: 100 }}
+          whileHover={{ scale: 1.1 }}
+          whileTap={{ scale: 0.9 }}
+          onClick={() => {
+            setActiveTab('home');
+            setMode('ai');
+            setQuery('What can you tell me about the current video?');
+          }}
+          className="fixed bottom-32 right-8 z-[100] w-16 h-16 rounded-full bg-lumina-gradient shadow-2xl flex items-center justify-center text-white border-2 border-white/20"
+        >
+          <Sparkles size={32} />
+          <div className="absolute -top-1 -right-1 w-5 h-5 bg-pink-500 rounded-full border-2 border-black flex items-center justify-center animate-bounce">
+            <span className="text-[10px] font-black">1</span>
+          </div>
+        </motion.button>
+      )}
+    </AnimatePresence>
+
+    <AnimatePresence>
+      {activeUrl && (
           <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} className="fixed inset-0 z-[100] flex flex-col bg-black/60 backdrop-blur-3xl p-2 md:p-6">
             <div className="flex-1 glass rounded-[44px] border-white/20 overflow-hidden flex flex-col shadow-2xl">
               <div className="px-6 py-4 border-b border-white/10 flex items-center justify-between bg-black/40">
